@@ -15,6 +15,7 @@ import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.HelpButton;
 import application.utils.gui.HelpDialog;
+import application.utils.gui.IconFontCache;
 import application.utils.gui.NewProfileChoiceDialog;
 import application.utils.gui.PlusGlyphIcon;
 import application.utils.gui.ProfileCopyDialog;
@@ -126,7 +127,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
     private static final Logger LOGGER = LoggerFactory.getLogger(ModuleLoggingProfilePanel.class);
 
     private static final String[] LOG_LEVELS =
-            {"SEVERE", "WARNING", "INFO", "CONFIG", "FINE", "FINER", "FINEST", "ALL", "OFF"};
+            {"ERROR", "WARN", "INFO", "DEBUG", "TRACE", "OFF"};
 
     /**
      * The virtual "Default" profile entry shown at the top of the profile
@@ -604,7 +605,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
      * selector (the two must look identical).
      */
     private final class ProfileCellRenderer extends DefaultListCellRenderer {
-        private final Icon appliedIcon = IconFontSwing.buildIcon(FontAwesome.CHECK,
+        private final Icon appliedIcon = IconFontCache.buildIcon(FontAwesome.CHECK,
                 GuiConstants.getHelpIconSize(), GuiColors.getApplied());
 
         @Override
@@ -650,7 +651,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
         for (String common : new String[]{"com.zaxxer.hikari", "org.jooq"}) {
             String key = common + ".level";
             if (!rowEditors.containsKey(key)) {
-                addRow(key, key, "WARNING");
+                addRow(key, key, "WARN");
             }
         }
 
@@ -856,7 +857,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
     private int actionColumnWidth() {
         if (actionColumnWidth == 0) {
             JButton protoTrash = new FlatIconButton();
-            protoTrash.setIcon(IconFontSwing.buildIcon(FontAwesome.TRASH,
+            protoTrash.setIcon(IconFontCache.buildIcon(FontAwesome.TRASH,
                     GuiConstants.getHelpIconSize(), GuiColors.getContrastRed()));
             FlatPlusButton protoPlus = new FlatPlusButton();
             protoPlus.setIcon(new PlusGlyphIcon(Math.round(GuiConstants.getHelpIconSize())));
@@ -1369,7 +1370,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
     private JButton buildRemoveKeyButton(String key) {
         boolean removable = isKeyRemovable(key);
         FlatIconButton removeBtn = new FlatIconButton();
-        removeBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.TRASH,
+        removeBtn.setIcon(IconFontCache.buildIcon(FontAwesome.TRASH,
                 GuiConstants.getHelpIconSize(), GuiColors.getContrastRed()));
         removeBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         removeBtn.setEnabled(removable);

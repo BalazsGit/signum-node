@@ -347,9 +347,11 @@ public final class Signum {
         // logged before the attach is replayed to it in chronological order.
         // getOrCreate() adopts the instance the GUI panel may have created early (see
         // NodeProfilePanel), so the GUI-construction logs captured before the Signum
-        // existed are preserved; otherwise it creates + registers a fresh one. Either
-        // way the ProfileLogger's forwarding to SystemLogger stays disabled (the
-        // SystemLoggerJulHandler already forwards), avoiding System Console duplicates.
+        // existed are preserved; otherwise it creates + registers a fresh one. The
+        // ProfileLogger forwards to SystemLogger (P8/F1): the legacy
+        // SystemLoggerJulHandler is gone (P3.5), so this forward is the node's only
+        // path to the System Console (no duplication — node events live only in the
+        // node's isolated context).
         this.profileLogger = application.utils.logging.NodeLoggerRegistry.getOrCreate(ModuleIds.NODE, profile.getName());
 
         // ── Step 2: the isolated node LoggerContext, minimal config first ──
@@ -968,7 +970,7 @@ public final class Signum {
             }
             ProfileFileAppender appender = new ProfileFileAppender(
                     profile.getName(),
-                    java.nio.file.Paths.get(propertyService.getString(Props.FILE_LOG_DIR)),
+                    application.utils.io.PathUtils.resolvePath(propertyService.getString(Props.FILE_LOG_DIR)),
                     ProfileFileAppender.parseLevel(propertyService.getString(Props.FILE_LOG_LEVEL)),
                     propertyService.getInt(Props.FILE_LOG_LIMIT),
                     propertyService.getInt(Props.FILE_LOG_COUNT));

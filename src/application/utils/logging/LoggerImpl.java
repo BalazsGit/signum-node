@@ -162,6 +162,17 @@ public abstract class LoggerImpl implements ModuleLogger {
         dispatch(event);
     }
 
+    @Override
+    public void forward(LogEvent event) {
+        if (closed || event == null) {
+            return;
+        }
+        // NO minLevel check (P8/F2): the caller (the node's isolated LoggerContext) is the
+        // sole native level gate. The event is already structured (original fields) —
+        // dispatch as-is (replay + subscriber fan-out + forward-to-system preserved).
+        dispatch(event);
+    }
+
     // ── Subscriber Management ───────────────────────────────────────────
 
     @Override

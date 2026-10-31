@@ -70,7 +70,7 @@ class SpikeQ1DefaultContextContractTest {
 
     /**
      * P1-style selector: serves one shared context for ANY name — this is exactly how
-     * {@code SignumGlobalContextSelector} will work (name is never used for routing).
+     * {@code NodeSystemContextSelector} will work (name is never used for routing).
      */
     static final class SingleContextSelector implements ContextSelector {
 

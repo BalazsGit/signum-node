@@ -1,20 +1,40 @@
-# System Module — Console & Logging
+# System Module — Console & System-Level Logging
 
 ## Overview
-The System module provides the global console infrastructure, log routing, and cross-module logging defaults.
+The System module provides the global console infrastructure, log routing, and
+the system-level (JVM-global) logging configuration layer.
 
-## Configuration Resolution Chain
+## System-Level Logging Configuration
+
+The system level owns the JVM-global logging context (every non-node-engine
+class: GUI, utils, launcher, database, browser, …). Its on-disk layout mirrors
+the node module (SSOT: `application.utils.config.LoggingPaths`):
 
 ```
-Step 1: System logging defaults (always loaded first)
-       classpath:/conf/system/logging/logging-default.properties
+conf/system/logging/
+├── default.properties          ← System L1: user-editable, global scope
+│                                  (auto-created at first start, never
+│                                  overwritten by the classpath sync)
+├── system-default.properties   ← Reference template (system L0 documentation,
+│                                  read-only, SHA-256 synced from resources)
+└── runtime/
+    └── global.log4j2.properties ← GENERATED global Log4j2 config (NOT SSOT)
 ```
+
+Layer order for the GLOBAL context (per key, the highest wins):
+L0 (built-in defaults of the non-node module providers) ← L1 node
+(`conf/node/logging/default.properties`, legacy compatibility) ← L1 system
+(`conf/system/logging/default.properties`, wins for global-scope keys).
+
+The system-level (global) file log destination is `logs/system/` — OUTSIDE
+the configuration tree, referenced relatively (disk-portable).
 
 ## Key Files
 
 | Resource (JAR) | Purpose |
 |---|---|
-| `/conf/system/logging/logging-default.properties` | Global logging baseline (root level, handlers, formatters) |
+| `/conf/system/logging/default.properties` | System L1 auto-create seed (header + comments, 0 active lines) |
+| `/conf/system/logging/system-default.properties` | System-level (global) reference template |
 
 ## Console Architecture
 

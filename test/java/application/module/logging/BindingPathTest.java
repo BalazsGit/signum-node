@@ -2,8 +2,8 @@ package application.module.logging;
 
 import application.module.logging.appender.SystemConsoleAppender;
 import application.module.logging.context.NodeLoggingContext;
-import application.module.logging.context.SignumGlobalContext;
-import application.module.logging.context.SignumGlobalContextSelector;
+import application.module.logging.context.NodeSystemContext;
+import application.module.logging.context.NodeSystemContextSelector;
 import application.utils.logging.SystemLogger;
 import application.utils.logging.event.LogEvent;
 import application.utils.logging.event.LogFilter;
@@ -28,8 +28,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * P3.5 gate — the binding path after the SLF4J/JUL swap. With log4j-slf4j2-impl + log4j-jul on
- * the classpath and the global-only {@link SignumGlobalContextSelector} installed, every
- * <em>static</em> logger (SLF4J and JUL) resolves to the single shared {@code signum-global}
+ * the classpath and the global-only {@link NodeSystemContextSelector} installed, every
+ * <em>static</em> logger (SLF4J and JUL) resolves to the single shared {@code system}
  * context, whose {@link SystemConsoleAppender} forwards its events to the {@link SystemLogger}
  * (System Console) <b>exactly once</b> (the legacy SystemLoggerJulHandler is no longer
  * installed). Node-context loggers remain bound to their OWN context (R1 isolation).
@@ -43,7 +43,7 @@ class BindingPathTest {
     @BeforeAll
     static void installGlobal() {
         previousFactory = (Log4jContextFactory) LogManager.getFactory();
-        LogManager.setFactory(new Log4jContextFactory(new SignumGlobalContextSelector()));
+        LogManager.setFactory(new Log4jContextFactory(new NodeSystemContextSelector()));
         // Fresh SystemLogger (empty replay) with a capturing recorder.
         SystemLogger.resetInstance();
         recorder = new Recorder();
@@ -51,7 +51,7 @@ class BindingPathTest {
         // Make the shared global context emit INFO and forward to the System Console. The
         // binding path under test is: SLF4J/JUL -> global context -> SystemConsoleAppender
         // -> SystemLogger. (Production configures this via GlobalLoggingApplier.applyGlobal.)
-        LoggerContext global = SignumGlobalContext.shared().loggerContext();
+        LoggerContext global = NodeSystemContext.shared().loggerContext();
         global.getConfiguration().getRootLogger().setLevel(Level.INFO);
         new SystemConsoleAppender().attach(global);
     }
@@ -65,12 +65,12 @@ class BindingPathTest {
     }
 
     @Test
-    @DisplayName("the null-name log4j lookup converges on the shared signum-global context")
+    @DisplayName("the null-name log4j lookup converges on the shared system context")
     void nullNameLookupConvergesOnGlobalContext() {
         LoggerContext byNullName = (LoggerContext) LogManager.getContext();
-        assertSame(SignumGlobalContext.shared().loggerContext(), byNullName,
+        assertSame(NodeSystemContext.shared().loggerContext(), byNullName,
                 "every static lookup must converge on the single shared global context");
-        assertEquals("signum-global", byNullName.getName());
+        assertEquals("system", byNullName.getName());
     }
 
     @Test
@@ -109,7 +109,7 @@ class BindingPathTest {
             Logger nodeLogger = (Logger) nlc.loggerContext().getLogger("application.p35gate.NodeEngine");
             assertSame(nlc.loggerContext(), nodeLogger.getContext(),
                     "the node logger must be bound to the NODE context");
-            assertNotSame(SignumGlobalContext.shared().loggerContext(), nodeLogger.getContext(),
+            assertNotSame(NodeSystemContext.shared().loggerContext(), nodeLogger.getContext(),
                     "the node logger must NOT be the global context");
         } finally {
             nlc.stop();

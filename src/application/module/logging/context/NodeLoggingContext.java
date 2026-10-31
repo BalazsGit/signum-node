@@ -24,7 +24,7 @@ import java.util.regex.Pattern;
  * The context is created <b>directly</b> (D7) — never looked up through the
  * factory/selector: {@code new LoggerContext(name, null, configUri)} plus an
  * explicit {@code start()} (the constructor does not start, P0 spike Q2a).
- * Its name is deterministic: {@code signum-node-<sanitized profile>}.
+ * Its name is deterministic: {@code node-<sanitized profile>}.
  * </p>
  *
  * <h3>Lifecycle (P0 spike Q6: stop -> start -> reconfigure is clean)</h3>
@@ -48,8 +48,8 @@ import java.util.regex.Pattern;
  */
 public final class NodeLoggingContext {
 
-    /** Context name prefix: {@code signum-node-<sanitized profile>} (plan §6.1). */
-    public static final String NAME_PREFIX = "signum-node-";
+    /** Context name prefix: {@code node-<sanitized profile>} (plan §6.1). */
+    public static final String NAME_PREFIX = "node-";
     private static final Pattern UNSAFE_NAME_CHARS = Pattern.compile("[^A-Za-z0-9_.\\-]");
     /** Infrastructure logger (JVM-global): reports degraded-config reconfigure refusals (audit P1.4). */
     private static final Logger LOGGER = LoggerFactory.getLogger(NodeLoggingContext.class);
@@ -77,7 +77,7 @@ public final class NodeLoggingContext {
     }
 
     /**
-     * Deterministic context name: {@code signum-node-} + the profile name with
+     * Deterministic context name: {@code node-} + the profile name with
      * every character outside {@code [A-Za-z0-9_.-]} replaced by {@code _}.
      */
     public static String contextNameFor(String profileName) {

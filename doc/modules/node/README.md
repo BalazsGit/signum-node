@@ -38,15 +38,23 @@ composition is `EffectiveProfileResolver` + `LoggingProfileManager`.
 
 ### Per-Node File Log
 
-Every running node writes its own log file (INFO and above) via the
-`ProfileFileAppender` (a `LogSubscriber` on the node's `ProfileLogger`):
+Every running node writes its own log file via the isolated Log4j2 node
+context's RollingFile appender (and the legacy `ProfileFileAppender` bus
+subscriber):
 
 ```
 {node.fileLog.dir}/{profileName}.log    (default: logs/node/{profileName}.log)
 ```
 
-Size-based rotation (`node.fileLog.limitBytes`, `node.fileLog.count`); the
-appender attaches on node start and detaches on stop/dispose.
+The log directory is a **relative** path (portable across disks) and lives
+**outside** the configuration tree: `logs/node/` (system-level: `logs/system/`).
+SSOT: `application.utils.config.LoggingPaths`.
+
+Configurable rotation (L0/L1/L2 keys, shown in the Logging GUI):
+`node.fileLog.enable`, `node.fileLog.dir`, `node.fileLog.level`,
+`node.fileLog.size` (rollover size, default `10MB`), `node.fileLog.max`
+(rolled files to keep, default `5`). The appender attaches on node start
+and detaches on stop/dispose.
 
 ## Logging Architecture
 

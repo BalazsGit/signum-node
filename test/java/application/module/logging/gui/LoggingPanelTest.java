@@ -113,6 +113,24 @@ class LoggingPanelTest {
                 "the Help button is enabled by default (core default help — no host supplier needed)");
     }
 
+    @Test
+    @DisplayName("The System tab has only the 'Logging Profiles' panel (no Assignments sub-tab)")
+    void systemTab_hasNoAssignmentsSubTab() throws Exception {
+        new application.module.logging.SystemLoggingProvider().register();
+        LoggingPanel panel = new LoggingPanel(context);
+        SwingUtilities.invokeAndWait(() -> { });
+
+        JTabbedPane tabs = findTabbedPane(panel);
+        assertEquals(1, tabs.getTabCount(), "one tab for the system provider");
+        assertEquals("System", tabs.getTitleAt(0), "the tab title is the system display name");
+        // The system context is a single context: it has no node-profile → logging-profile
+        // associations, so its tab is the bare 'Logging Profiles' panel — NOT an inner
+        // JTabbedPane carrying an Assignments sub-tab (decision D5 / §5).
+        Component tab = tabs.getComponentAt(0);
+        assertTrue(tab instanceof ModuleLoggingProfilePanel,
+                "the system tab must be the bare Logging Profiles panel (no Assignments sub-tab)");
+    }
+
     /** Finds the toolbar Help (question mark) button in the component tree by its tooltip. */
     private static JButton findHelpButton(Container root) {
         for (int i = 0; i < root.getComponentCount(); i++) {

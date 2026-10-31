@@ -3,7 +3,7 @@ package application.module.logging;
 import application.module.logging.context.NodeLoggingContext;
 import application.module.logging.context.NodeLoggingContextApplier;
 import application.module.logging.context.NodeLoggingContextManager;
-import application.module.logging.context.SignumGlobalContext;
+import application.module.logging.context.NodeSystemContext;
 import application.module.node.Signum;
 import application.module.node.profile.NodeProfile;
 import application.utils.logging.NodeLoggerRegistry;
@@ -74,13 +74,14 @@ class GlobalLoggingApplierTest {
 
         assertTrue(GlobalLoggingApplier.applyGlobal(confRoot.toString()));
 
-        Path globalFile = confRoot.resolve("logging-runtime").resolve("global.log4j2.properties");
+        Path globalFile = confRoot.resolve("system").resolve("logging").resolve("runtime")
+                .resolve("global.log4j2.properties");
         assertTrue(Files.exists(globalFile), "the generated global file must exist");
-        SignumGlobalContext global = SignumGlobalContext.shared();
+        NodeSystemContext global = NodeSystemContext.shared();
         assertEquals(globalFile.toUri(), global.configUri(),
                 "the shared global context must now be configured from the generated file");
         assertTrue(global.loggerContext().isStarted());
-        assertEquals("signum-global", global.loggerContext().getName());
+        assertEquals("system", global.loggerContext().getName());
     }
 
     @Test
@@ -88,13 +89,13 @@ class GlobalLoggingApplierTest {
     void globalApply_secondRun_reconfiguresSameSharedContext() throws Exception {
         writeL1(props("node.level", "INFO"));
         assertTrue(GlobalLoggingApplier.applyGlobal(confRoot.toString()));
-        SignumGlobalContext first = SignumGlobalContext.shared();
+        NodeSystemContext first = NodeSystemContext.shared();
 
         writeL1(props("node.level", "SEVERE"));
         assertTrue(GlobalLoggingApplier.applyGlobal(confRoot.toString()));
 
-        assertSame(first, SignumGlobalContext.shared(), "exactly one global context for the JVM");
-        assertTrue(SignumGlobalContext.shared().loggerContext().isStarted(),
+        assertSame(first, NodeSystemContext.shared(), "exactly one global context for the JVM");
+        assertTrue(NodeSystemContext.shared().loggerContext().isStarted(),
                 "the global context stays started across in-place reconfigures");
     }
 
@@ -199,7 +200,7 @@ class GlobalLoggingApplierTest {
         Path missing = confRoot.resolve("does-not-exist");
         // no exception — and the global context stays usable
         GlobalLoggingApplier.applyGlobal(missing.toString());
-        assertTrue(SignumGlobalContext.shared().loggerContext().isStarted());
+        assertTrue(NodeSystemContext.shared().loggerContext().isStarted());
     }
 
     /** Captures every bus event for assertions. */

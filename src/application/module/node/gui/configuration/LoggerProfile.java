@@ -39,14 +39,10 @@ public class LoggerProfile {
     }
 
     public void applyInternalDefaults() {
-        properties.setProperty("handlers", "java.util.logging.ConsoleHandler");
-        properties.setProperty(".level", "SEVERE");
         properties.setProperty("node.level", "INFO");
-        properties.setProperty("java.util.logging.ConsoleHandler.level", "ALL");
-        properties.setProperty("java.util.logging.ConsoleHandler.formatter", "application.module.node.util.BriefLogFormatter");
         properties.setProperty("org.eclipse.jetty.level", "OFF");
         properties.setProperty("javax.servlet.level", "OFF");
-        properties.setProperty("com.zaxxer.hikari.level", "WARNING");
+        properties.setProperty("com.zaxxer.hikari.level", "WARN");
         properties.setProperty("com.zaxxer.hikari.HikariConfig.level", "INFO");
         properties.setProperty("sun.rmi.level", "INFO");
         properties.setProperty("javax.management.level", "INFO");

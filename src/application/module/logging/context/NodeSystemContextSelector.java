@@ -19,7 +19,7 @@ import java.util.List;
  * null-name path ({@code LogManager.getContext()}) and the caller-FQCN path
  * taken by the SLF4J binding ({@code log4j-slf4j2-impl}) and the JUL bridge
  * ({@code log4j-jul}) — resolves to the same single global context,
- * {@value #GLOBAL_CONTEXT_NAME}.
+ * {@value #SYSTEM_CONTEXT_NAME}.
  * </p>
  * <p>
  * P0 spike evidence (2026-10-22, commit P0-1, Q1): on log4j 2.26.1 the
@@ -33,25 +33,25 @@ import java.util.List;
  * immutable and thread-safe.
  * </p>
  */
-public final class SignumGlobalContextSelector implements ContextSelector {
+public final class NodeSystemContextSelector implements ContextSelector {
 
     /**
      * Deterministic name of the global context — replaces log4j's default
      * "Default" name so dumps/diagnostics can identify it.
      */
-    public static final String GLOBAL_CONTEXT_NAME = "signum-global";
+    public static final String SYSTEM_CONTEXT_NAME = "system";
 
     private final LoggerContext globalContext;
 
     /**
      * The production (no-config) selector: serves the ONE shared global context
-     * ({@link SignumGlobalContext#shared()}) so that every SLF4J/JUL static lookup
+     * ({@link NodeSystemContext#shared()}) so that every SLF4J/JUL static lookup
      * converges on the SAME context the global Apply pipeline
      * ({@code GlobalLoggingApplier}) reconfigures and the
      * {@code SystemConsoleAppender} attaches to (P3.5 coherence).
      */
-    public SignumGlobalContextSelector() {
-        this.globalContext = SignumGlobalContext.shared().loggerContext();
+    public NodeSystemContextSelector() {
+        this.globalContext = NodeSystemContext.shared().loggerContext();
     }
 
     /**
@@ -63,12 +63,12 @@ public final class SignumGlobalContextSelector implements ContextSelector {
      *                  the context (P0 spike Q2a) — this constructor starts it
      *                  explicitly, which applies the configuration.
      */
-    public SignumGlobalContextSelector(final URI configUri) {
+    public NodeSystemContextSelector(final URI configUri) {
         if (configUri == null) {
             throw new IllegalArgumentException(
                     "configUri must not be null (use the no-arg constructor for the shared global context)");
         }
-        final LoggerContext context = new LoggerContext(GLOBAL_CONTEXT_NAME, null, configUri);
+        final LoggerContext context = new LoggerContext(SYSTEM_CONTEXT_NAME, null, configUri);
         context.start();
         this.globalContext = context;
     }

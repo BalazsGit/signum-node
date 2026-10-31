@@ -79,7 +79,7 @@ class ContextLeakTest {
             assertTrue(manager.remove("leak-0"));
         }
         // the JVM-wide global context must be untouched by all the node churn
-        assertTrue(SignumGlobalContext.shared().loggerContext().isStarted(),
+        assertTrue(NodeSystemContext.shared().loggerContext().isStarted(),
                 "the shared global context must survive the node dispose cycles");
     }
 }

@@ -16,6 +16,7 @@ import application.module.node.gui.SystemConsoleSubscriber;
 import application.utils.gui.console.ConsolePanelConfiguration;
 import application.utils.gui.console.UnifiedConsolePanel;
 import application.utils.logging.ConsoleColorScheme;
+import application.utils.logging.ConsoleLimits;
 import application.utils.logging.SystemLogger;
 import application.utils.logging.event.LogFilter;
 import org.slf4j.Logger;
@@ -56,11 +57,14 @@ public class SystemConsoleModule implements Module {
 
     @Override
     public void init(ModuleContext context) {
-        // 1. Create unified panel with system console configuration
+        // 1. Create unified panel with system console configuration.
+        // The console line buffer is read from the system logging profile SSOT
+        // (console.maxLines, F4 / decision D5) instead of a hard-coded constant.
+        int consoleMaxLines = resolveSystemConsoleMaxLines(context);
         ConsolePanelConfiguration config = ConsolePanelConfiguration.systemConsole()
                 .withShowFilterHeader(true)
                 .withShowCommandInput(true)
-                .withMaxLines(1000)
+                .withMaxLines(consoleMaxLines)
                 .withColorScheme(ConsoleColorScheme.getDefault())
                 .withCommandHandler(cmd -> {
                     // v4 (P1.8): the System Console routes through the universal CommandRouter —
@@ -156,6 +160,32 @@ public class SystemConsoleModule implements Module {
         if (unifiedPanel.getFilterHeader() != null) {
             SwingUtilities.invokeLater(() -> unifiedPanel.getFilterHeader().setProfiles(profiles));
         }
+    }
+
+    /**
+     * Resolves the system console line buffer from the system logging profile SSOT
+     * ({@code console.maxLines}, F4 / decision D5). Reads the system L1
+     * ({@code conf/system/logging/default.properties}) and falls back to the L0 default
+     * ({@link ConsoleLimits#DEFAULT_SYSTEM_MAX_LINES}) when the file or key is absent.
+     * Reading a single properties file at bootstrap is bounded and non-fatal.
+     */
+    private static int resolveSystemConsoleMaxLines(ModuleContext context) {
+        try {
+            java.nio.file.Path confRoot = context.getConfigDirectory();
+            if (confRoot != null) {
+                java.nio.file.Path l1 = application.utils.config.LoggingPaths.systemL1File(confRoot.toString());
+                if (java.nio.file.Files.exists(l1)) {
+                    java.util.Properties props = new java.util.Properties();
+                    try (java.io.InputStream in = java.nio.file.Files.newInputStream(l1)) {
+                        props.load(in);
+                    }
+                    return ConsoleLimits.systemMaxLines(props);
+                }
+            }
+        } catch (Exception ignored) {
+            // Non-fatal: fall back to the L0 default.
+        }
+        return ConsoleLimits.DEFAULT_SYSTEM_MAX_LINES;
     }
 
     @Override

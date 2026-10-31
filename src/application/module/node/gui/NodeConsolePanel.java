@@ -117,9 +117,11 @@ import application.utils.gui.GuiIcons;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.HelpButton;
 import application.utils.gui.SmartScrollController;
+import application.utils.gui.IconFontCache;
 import application.module.node.util.Convert;
 import application.module.node.profile.NodeProfile;
 import application.utils.logging.ProfileLogger;
+import application.utils.logging.NodeLoggerRegistry;
 import application.utils.gui.console.ConsoleInputPosition;
 import application.utils.gui.console.ConsolePanelConfiguration;
 import application.utils.gui.console.UnifiedConsolePanel;
@@ -159,6 +161,15 @@ public class NodeConsolePanel extends JPanel {
     private static final int ANIMATION_DURATION_MS = 250;
 
     private static final Logger LOGGER = LoggerFactory.getLogger(NodeConsolePanel.class);
+
+    /**
+     * P8/F4: this panel's node-relevant messages route to the profile's own
+     * {@link ProfileLogger} (node console + — via the P8/F1 forward — System Console)
+     * instead of the static SLF4J logger (global "system" context).
+     */
+    private ProfileLogger nodeLogger() {
+        return NodeLoggerRegistry.getOrCreate(ModuleIds.NODE, profileName);
+    }
 
     /**
      * Per-instance Signum facade injected by NodeProfilePanel.
@@ -330,11 +341,11 @@ public class NodeConsolePanel extends JPanel {
 
     private void updateVolumeLabelIcons() {
         if (uploadVolumeLabel != null) {
-            uploadVolumeLabel.setIcon(IconFontSwing.buildIcon(FontAwesome.ARROW_UP, GuiConstants.getHelpIconSize(),
+            uploadVolumeLabel.setIcon(IconFontCache.buildIcon(FontAwesome.ARROW_UP, GuiConstants.getHelpIconSize(),
                     GuiColors.getButtonIcon()));
         }
         if (downloadVolumeLabel != null) {
-            downloadVolumeLabel.setIcon(IconFontSwing.buildIcon(FontAwesome.ARROW_DOWN, GuiConstants.getHelpIconSize(),
+            downloadVolumeLabel.setIcon(IconFontCache.buildIcon(FontAwesome.ARROW_DOWN, GuiConstants.getHelpIconSize(),
                     GuiColors.getButtonIcon()));
         }
     }
@@ -1240,9 +1251,9 @@ public class NodeConsolePanel extends JPanel {
 
         showMetricsItem = new JCheckBox("Show Metrics Panel");
         showMetricsItem.setSelected(showMetricsPanel);
-        LOGGER.info("[DEBUG-MetricsPanel] ==== hamburger checkbox created ===== initial selected={}", showMetricsPanel);
+        LOGGER.debug("[DEBUG-MetricsPanel] ==== hamburger checkbox created ===== initial selected={}", showMetricsPanel);
         showMetricsItem.addActionListener(e -> {
-            LOGGER.info("[DEBUG-MetricsPanel] ==== HAMBURGER CHECKBOX CLICKED ===== new checked={}", showMetricsItem.isSelected());
+            LOGGER.debug("[DEBUG-MetricsPanel] ==== HAMBURGER CHECKBOX CLICKED ===== new checked={}", showMetricsItem.isSelected());
             updateMetricsPanelState(showMetricsItem.isSelected());
         });
         styleMenuComponent(showMetricsItem);
@@ -1500,7 +1511,7 @@ public class NodeConsolePanel extends JPanel {
                 + "- measurement/sync_measurement.csv\n"
                 + "- measurement/sync_progress.csv\n" + "for analysis."
                 + "\n\nEnabled by property: node.measurementActive = true";
-        measurementLabel = new JLabel(IconFontSwing.buildIcon(FontAwesome.FLASK, GuiConstants.getToolBarIconSize(),
+        measurementLabel = new JLabel(IconFontCache.buildIcon(FontAwesome.FLASK, GuiConstants.getToolBarIconSize(),
                 GuiColors.getButtonIcon()));
         addInfoTooltip(measurementLabel, tooltip, "MEASUREMENT");
         measurementLabel.setVisible(false);
@@ -1517,7 +1528,7 @@ public class NodeConsolePanel extends JPanel {
                 + "- measurement/sync_progress.csv\n" + "for analysis."
                 + "\n\nEnabled by property: node.experimental = true";
         experimentalLabel = new JLabel(
-                IconFontSwing.buildIcon(FontAwesome.COG, GuiConstants.getToolBarIconSize(), GuiColors.getButtonIcon()));
+                IconFontCache.buildIcon(FontAwesome.COG, GuiConstants.getToolBarIconSize(), GuiColors.getButtonIcon()));
         addInfoTooltip(experimentalLabel, tooltip, "EXPERIMENTAL");
         experimentalLabel.setVisible(false);
         experimentalSeparator.setVisible(false);
@@ -1529,7 +1540,7 @@ public class NodeConsolePanel extends JPanel {
         trimIconSeparator = new JSeparator(SwingConstants.VERTICAL);
         trimIconSeparator.setPreferredSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
         trimIconSeparator.setMaximumSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
-        trimLabel = new JLabel(IconFontSwing.buildIcon(FontAwesome.SCISSORS, GuiConstants.getToolBarIconSize(),
+        trimLabel = new JLabel(IconFontCache.buildIcon(FontAwesome.SCISSORS, GuiConstants.getToolBarIconSize(),
                 GuiColors.getButtonIcon()));
         trimLabel.setVisible(false);
         trimIconSeparator.setVisible(false);
@@ -1544,7 +1555,7 @@ public class NodeConsolePanel extends JPanel {
         tooltip = "Auto-Resolve is enabled.\n" +
                 "If database inconsistency is detected at startup, the node will automatically attempt to resolve it by rolling back blocks."
                 + "\n\nEnabled by property: node.autoConsistencyResolve = true";
-        autoResolveLabel = new JLabel(IconFontSwing.buildIcon(FontAwesome.WRENCH, GuiConstants.getToolBarIconSize(),
+        autoResolveLabel = new JLabel(IconFontCache.buildIcon(FontAwesome.WRENCH, GuiConstants.getToolBarIconSize(),
                 GuiColors.getButtonIcon()));
         addInfoTooltip(autoResolveLabel, tooltip, "AUTO RESOLVE");
         autoResolveLabel.setVisible(false);
@@ -1776,37 +1787,37 @@ public class NodeConsolePanel extends JPanel {
         float iconSize = GuiConstants.getToolBarIconSize();
 
         if (openPhoenixButton != null)
-            openPhoenixButton.setIcon(IconFontSwing.buildIcon(FontAwesome.FIRE, iconSize, currentIconColor));
+            openPhoenixButton.setIcon(IconFontCache.buildIcon(FontAwesome.FIRE, iconSize, currentIconColor));
         if (openClassicButton != null)
-            openClassicButton.setIcon(IconFontSwing.buildIcon(FontAwesome.WINDOW_RESTORE, iconSize, currentIconColor));
+            openClassicButton.setIcon(IconFontCache.buildIcon(FontAwesome.WINDOW_RESTORE, iconSize, currentIconColor));
         if (openApiButton != null)
-            openApiButton.setIcon(IconFontSwing.buildIcon(FontAwesome.BOOK, iconSize, currentIconColor));
+            openApiButton.setIcon(IconFontCache.buildIcon(FontAwesome.BOOK, iconSize, currentIconColor));
         if (editConfButton != null)
-            editConfButton.setIcon(IconFontSwing.buildIcon(FontAwesome.PENCIL, iconSize, currentIconColor));
+            editConfButton.setIcon(IconFontCache.buildIcon(FontAwesome.PENCIL, iconSize, currentIconColor));
         if (popOff10Button != null)
-            popOff10Button.setIcon(IconFontSwing.buildIcon(FontAwesome.STEP_BACKWARD, iconSize, currentIconColor));
+            popOff10Button.setIcon(IconFontCache.buildIcon(FontAwesome.STEP_BACKWARD, iconSize, currentIconColor));
         if (popOff100Button != null)
-            popOff100Button.setIcon(IconFontSwing.buildIcon(FontAwesome.BACKWARD, iconSize, currentIconColor));
+            popOff100Button.setIcon(IconFontCache.buildIcon(FontAwesome.BACKWARD, iconSize, currentIconColor));
         if (syncButton != null) {
-            syncButton.setIcon(IconFontSwing.buildIcon(isSyncStopped ? FontAwesome.PLAY : FontAwesome.PAUSE, iconSize,
+            syncButton.setIcon(IconFontCache.buildIcon(isSyncStopped ? FontAwesome.PLAY : FontAwesome.PAUSE, iconSize,
                     currentIconColor));
         }
         if (restartButton != null)
-            restartButton.setIcon(IconFontSwing.buildIcon(FontAwesome.REFRESH, iconSize, currentIconColor));
+            restartButton.setIcon(IconFontCache.buildIcon(FontAwesome.REFRESH, iconSize, currentIconColor));
         if (shutdownButton != null)
-            shutdownButton.setIcon(IconFontSwing.buildIcon(FontAwesome.POWER_OFF, iconSize, currentIconColor));
+            shutdownButton.setIcon(IconFontCache.buildIcon(FontAwesome.POWER_OFF, iconSize, currentIconColor));
 
         if (measurementLabel != null)
-            measurementLabel.setIcon(IconFontSwing.buildIcon(FontAwesome.FLASK, GuiConstants.getToolBarIconSize(),
+            measurementLabel.setIcon(IconFontCache.buildIcon(FontAwesome.FLASK, GuiConstants.getToolBarIconSize(),
                     GuiColors.getButtonIcon()));
         if (experimentalLabel != null)
-            experimentalLabel.setIcon(IconFontSwing.buildIcon(FontAwesome.COG, GuiConstants.getToolBarIconSize(),
+            experimentalLabel.setIcon(IconFontCache.buildIcon(FontAwesome.COG, GuiConstants.getToolBarIconSize(),
                     GuiColors.getButtonIcon()));
         if (trimLabel != null)
-            trimLabel.setIcon(IconFontSwing.buildIcon(FontAwesome.SCISSORS, GuiConstants.getToolBarIconSize(),
+            trimLabel.setIcon(IconFontCache.buildIcon(FontAwesome.SCISSORS, GuiConstants.getToolBarIconSize(),
                     GuiColors.getButtonIcon()));
         if (autoResolveLabel != null)
-            autoResolveLabel.setIcon(IconFontSwing.buildIcon(FontAwesome.WRENCH, GuiConstants.getToolBarIconSize(),
+            autoResolveLabel.setIcon(IconFontCache.buildIcon(FontAwesome.WRENCH, GuiConstants.getToolBarIconSize(),
                     GuiColors.getButtonIcon()));
 
         if (menuButton != null)
@@ -1814,7 +1825,7 @@ public class NodeConsolePanel extends JPanel {
 
         if (globeButton != null)
             globeButton.setIcon(
-                    IconFontSwing.buildIcon(FontAwesome.GLOBE, GuiConstants.getToolBarIconSize(), currentIconColor));
+                    IconFontCache.buildIcon(FontAwesome.GLOBE, GuiConstants.getToolBarIconSize(), currentIconColor));
     }
 
     private void updatePopOffToggleIcon() {
@@ -1824,18 +1835,18 @@ public class NodeConsolePanel extends JPanel {
 
     private void updateDbCheckButtonIcon() {
         if (dbCheckButton != null) {
-            dbCheckButton.setIcon(IconFontSwing.buildIcon(FontAwesome.DATABASE, GuiConstants.getToolBarIconSize(),
+            dbCheckButton.setIcon(IconFontCache.buildIcon(FontAwesome.DATABASE, GuiConstants.getToolBarIconSize(),
                     dbConsistencyColor));
         }
     }
 
     private void updateTimeLabelIcons() {
         if (totalTimeLabel != null) {
-            totalTimeLabel.setIcon(IconFontSwing.buildIcon(FontAwesome.CLOCK_O, GuiConstants.getHelpIconSize(),
+            totalTimeLabel.setIcon(IconFontCache.buildIcon(FontAwesome.CLOCK_O, GuiConstants.getHelpIconSize(),
                     GuiColors.getButtonIcon()));
         }
         if (syncInProgressTimeLabel != null) {
-            syncInProgressTimeLabel.setIcon(IconFontSwing.buildIcon(FontAwesome.REFRESH, GuiConstants.getHelpIconSize(),
+            syncInProgressTimeLabel.setIcon(IconFontCache.buildIcon(FontAwesome.REFRESH, GuiConstants.getHelpIconSize(),
                     GuiColors.getButtonIcon()));
         }
     }
@@ -2101,7 +2112,7 @@ public class NodeConsolePanel extends JPanel {
                     height,
                     totalMinedSigna, totalMined,
                     totalEffectiveBalanceSigna, totalEffectiveBalance);
-            icon = IconFontSwing.buildIcon(FontAwesome.CHECK_CIRCLE, GuiConstants.ICON_SIZE_DIALOG,
+            icon = IconFontCache.buildIcon(FontAwesome.CHECK_CIRCLE, GuiConstants.ICON_SIZE_DIALOG,
                     new Color(0, 128, 0));
             JOptionPane.showMessageDialog(NodeConsolePanel.this, message, "Database Consistency Check",
                     JOptionPane.INFORMATION_MESSAGE, icon);
@@ -2137,7 +2148,7 @@ public class NodeConsolePanel extends JPanel {
             }
             resolveMessage += "The process stops if consistency is restored before reaching this limit.";
 
-            icon = IconFontSwing.buildIcon(FontAwesome.EXCLAMATION_TRIANGLE, GuiConstants.ICON_SIZE_DIALOG,
+            icon = IconFontCache.buildIcon(FontAwesome.EXCLAMATION_TRIANGLE, GuiConstants.ICON_SIZE_DIALOG,
                     GuiColors.getContrastRed());
 
             if (blockchainProcessor.getResolutionState() == BlockchainProcessor.ResolutionState.ACTIVE) {
@@ -2241,7 +2252,7 @@ public class NodeConsolePanel extends JPanel {
 
     // Package-private for internal use
     void restart() {
-        LOGGER.info("Restart requested for profile '{}' (async, no dialog)", profileName);
+        nodeLogger().info("Restart requested for profile '" + profileName + "' (async, no dialog)");
         saveGuiSettings();
         // Per-node restart is asynchronous (NodeModule lifecycle thread); the node's state
         // machine drives the UI (info bar, toolbar, console). No blocking dialog is shown:
@@ -2625,14 +2636,14 @@ public class NodeConsolePanel extends JPanel {
             isSyncStopped = isPaused;
             if (isSyncStopped) {
                 syncButton.setText("Resume Sync");
-                syncButton.setIcon(IconFontSwing.buildIcon(FontAwesome.PLAY, GuiConstants.getToolBarIconSize(),
+                syncButton.setIcon(IconFontCache.buildIcon(FontAwesome.PLAY, GuiConstants.getToolBarIconSize(),
                         GuiColors.getButtonIcon()));
                 if (guiTimer != null) {
                     guiTimer.stop();
                 }
             } else {
                 syncButton.setText("Pause Sync");
-                syncButton.setIcon(IconFontSwing.buildIcon(FontAwesome.PAUSE, GuiConstants.getToolBarIconSize(),
+                syncButton.setIcon(IconFontCache.buildIcon(FontAwesome.PAUSE, GuiConstants.getToolBarIconSize(),
                         GuiColors.getButtonIcon()));
                 if (guiTimer != null) {
                     guiTimer.start();
@@ -2691,7 +2702,7 @@ public class NodeConsolePanel extends JPanel {
         ProfileLogger pl = resolveProfileLogger();
         if (pl == null) {
             if (unifiedConsole.getSubscriber() == null) {
-                LOGGER.warn("Cannot attach ProfileLogger: no ProfileLogger found for profile '{}' (node not yet started?)", profileName);
+                nodeLogger().warn("Cannot attach ProfileLogger: no ProfileLogger found for profile '" + profileName + "' (node not yet started?)");
             }
             return; // node not (re)started yet — a later attach will wire it up
         }
@@ -2701,15 +2712,14 @@ public class NodeConsolePanel extends JPanel {
             unifiedConsole.recreateSubscriber();
         }
         if (unifiedConsole.getSubscriber() == null) {
-            LOGGER.warn("Cannot attach ProfileLogger: unified console subscriber is null for profile '{}'", profileName);
+            nodeLogger().warn("Cannot attach ProfileLogger: unified console subscriber is null for profile '" + profileName + "'");
             return;
         }
         try {
             pl.addSubscriber(unifiedConsole.getSubscriber());
             final String attachedName = pl.getName();
             final String attachedProfile = profileName;
-            LOGGER.info("Attached console subscriber to ProfileLogger '{}' for profile '{}'",
-                    attachedName, attachedProfile);
+            nodeLogger().info("Attached console subscriber to ProfileLogger '" + attachedName + "' for profile '" + attachedProfile + "'");
             profileLoggerAttached = true;
         } catch (Exception e) {
             LOGGER.error("Failed to attach console subscriber to ProfileLogger for profile '{}'", profileName, e);
@@ -3114,7 +3124,7 @@ public class NodeConsolePanel extends JPanel {
                 // configuration here.
                 configureFeatureIndicators(processor);
             });
-            LOGGER.info("[{}] Runtime listeners wired — Latest block / peer / volume labels active", profileName);
+            nodeLogger().info("[" + profileName + "] Runtime listeners wired — Latest block / peer / volume labels active");
         } catch (Exception e) {
             LOGGER.error("[{}] ensureRuntimeWiring failed", profileName, e);
         }
@@ -3200,7 +3210,7 @@ public class NodeConsolePanel extends JPanel {
     }
 
     private void updateMetricsPanelState(boolean show) {
-        LOGGER.info("[DEBUG-MetricsPanel] ==== updateMetricsPanelState(show={}) CALLED ===== thread={}, showMetricsPanel={}, metricsPanel={}, animatorRunning={}",
+        LOGGER.debug("[DEBUG-MetricsPanel] ==== updateMetricsPanelState(show={}) CALLED ===== thread={}, showMetricsPanel={}, metricsPanel={}, animatorRunning={}",
             show, Thread.currentThread().getName(), showMetricsPanel, metricsPanel != null ? "exists" : "null",
             metricsPanelAnimator != null && metricsPanelAnimator.isRunning());
 
@@ -3210,7 +3220,7 @@ public class NodeConsolePanel extends JPanel {
         }
 
         showMetricsPanel = show;
-        LOGGER.info("[DEBUG-MetricsPanel] updateMetricsPanelState: showMetricsPanel={}", showMetricsPanel);
+        LOGGER.debug("[DEBUG-MetricsPanel] updateMetricsPanelState: showMetricsPanel={}", showMetricsPanel);
 
         // Get SmartScrollController from unifiedConsole's subscriber to suppress events during animation.
         final SmartScrollController scrollController;
@@ -3222,7 +3232,7 @@ public class NodeConsolePanel extends JPanel {
 
         // Suppress scrollbar adjustment events so viewport resize doesn't corrupt SmartScrollController state
         boolean wasSuppressing = scrollController != null && scrollController.setSuppressingEvents(true);
-        LOGGER.info("[DEBUG-MetricsPanel] SmartScrollController suppression activated: wasSuppressing={}, controller={}",
+        LOGGER.debug("[DEBUG-MetricsPanel] SmartScrollController suppression activated: wasSuppressing={}, controller={}",
                 wasSuppressing, scrollController != null ? "exists" : "null");
 
         if (show) {
@@ -3303,7 +3313,7 @@ public class NodeConsolePanel extends JPanel {
                         // Restore SmartScrollController state after animation completes
                         if (scrollController != null) {
                             scrollController.setSuppressingEvents(wasSuppressing);
-                            LOGGER.info("[DEBUG-MetricsPanel] SmartScrollController suppression restored after expand: wasSuppressing={}", wasSuppressing);
+                            LOGGER.debug("[DEBUG-MetricsPanel] SmartScrollController suppression restored after expand: wasSuppressing={}", wasSuppressing);
                         }
                     }
                 }
@@ -3343,7 +3353,7 @@ public class NodeConsolePanel extends JPanel {
                             // Restore SmartScrollController state after animation completes
                             if (scrollController != null) {
                                 scrollController.setSuppressingEvents(wasSuppressing);
-                                LOGGER.info("[DEBUG-MetricsPanel] SmartScrollController suppression restored after collapse: wasSuppressing={}", wasSuppressing);
+                                LOGGER.debug("[DEBUG-MetricsPanel] SmartScrollController suppression restored after collapse: wasSuppressing={}", wasSuppressing);
                             }
                         }
                     }
@@ -4092,12 +4102,12 @@ public class NodeConsolePanel extends JPanel {
          */
         private static void maybeScrollToEnd(JTextPane tp, JScrollPane pane) {
             if (pane == null) {
-                LOGGER.info("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: pane=null, returning early");
+                LOGGER.debug("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: pane=null, returning early");
                 return;
             }
             javax.swing.JScrollBar verticalBar = pane.getVerticalScrollBar();
             if (verticalBar == null) {
-                LOGGER.info("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: verticalBar=null, returning early");
+                LOGGER.debug("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: verticalBar=null, returning early");
                 return;
             }
             int max = verticalBar.getMaximum();
@@ -4106,19 +4116,19 @@ public class NodeConsolePanel extends JPanel {
             int scrollableRange = max - extent;
             
             double ratioForLog = scrollableRange > 0 ? (double) current / scrollableRange : Double.NaN;
-            LOGGER.info("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: max={}, extent={}, current={}, scrollableRange={}, ratio={}, threshold={}", 
+            LOGGER.debug("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: max={}, extent={}, current={}, scrollableRange={}, ratio={}, threshold={}", 
                 max, extent, current, scrollableRange, ratioForLog, SMART_SCROLL_THRESHOLD);
             
             if (scrollableRange <= 0) {
-                LOGGER.info("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: scrollableRange<=0, no scroll needed");
+                LOGGER.debug("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: scrollableRange<=0, no scroll needed");
                 return;
             }
             double positionRatio = (double) current / scrollableRange;
             if (positionRatio >= SMART_SCROLL_THRESHOLD) {
-                LOGGER.info("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: WILL SCROLL - ratio={} >= threshold={}", positionRatio, SMART_SCROLL_THRESHOLD);
+                LOGGER.debug("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: WILL SCROLL - ratio={} >= threshold={}", positionRatio, SMART_SCROLL_THRESHOLD);
                 verticalBar.setValue(max);
             } else {
-                LOGGER.info("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: NO SCROLL - ratio={} < threshold={} (user reading old logs)", positionRatio, SMART_SCROLL_THRESHOLD);
+                LOGGER.debug("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: NO SCROLL - ratio={} < threshold={} (user reading old logs)", positionRatio, SMART_SCROLL_THRESHOLD);
             }
         }
     }
@@ -4206,7 +4216,7 @@ public class NodeConsolePanel extends JPanel {
                 GuiFontManager.applyDefaultFont(leftTextLabel);
                 GuiFontManager.applyDefaultFont(rightTextLabel);
                 if (currentIcon != null) {
-                    iconLabel.setIcon(IconFontSwing.buildIcon(currentIcon, GuiConstants.getHelpIconSize(),
+                    iconLabel.setIcon(IconFontCache.buildIcon(currentIcon, GuiConstants.getHelpIconSize(),
                             currentIconColor != null ? currentIconColor : UIManager.getColor("Label.foreground")));
                 }
             }
@@ -4227,7 +4237,7 @@ public class NodeConsolePanel extends JPanel {
             rightTextLabel.setForeground(actualTextColor);
 
             if (icon != null) {
-                iconLabel.setIcon(IconFontSwing.buildIcon(icon, GuiConstants.getHelpIconSize(), actualIconColor));
+                iconLabel.setIcon(IconFontCache.buildIcon(icon, GuiConstants.getHelpIconSize(), actualIconColor));
                 iconLabel.setVisible(true);
             } else {
                 iconLabel.setIcon(null);
@@ -4239,7 +4249,7 @@ public class NodeConsolePanel extends JPanel {
             leftTextLabel.setForeground(color);
             rightTextLabel.setForeground(color);
             if (currentIcon != null) {
-                iconLabel.setIcon(IconFontSwing.buildIcon(currentIcon, GuiConstants.getHelpIconSize(), color));
+                iconLabel.setIcon(IconFontCache.buildIcon(currentIcon, GuiConstants.getHelpIconSize(), color));
                 currentIconColor = color;
             }
         }
@@ -4341,7 +4351,7 @@ public class NodeConsolePanel extends JPanel {
      * @param newState the current lifecycle state
      */
     public void onNodeStateChanged(Signum.State oldState, Signum.State newState) {
-        LOGGER.debug("[MetricsPanel] Lifecycle state change: {} -> {}", oldState, newState);
+        nodeLogger().debug("[MetricsPanel] Lifecycle state change: " + oldState + " -> " + newState);
 
         // Log capture must start EARLY (STARTING) so the profile console shows the
         // boot output from the very first moment — possibly started by the toolbar

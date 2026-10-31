@@ -1,6 +1,7 @@
 package application.module.logging.gui;
 
 import application.api.ModuleContext;
+import application.utils.config.ModuleIds;
 import application.utils.logging.LoggingModuleRegistry;
 import application.utils.logging.ModuleLoggingProvider;
 import org.slf4j.Logger;
@@ -95,6 +96,12 @@ public class LoggingPanel extends JPanel {
      * @return the composite tab component
      */
     private JComponent buildModuleTab(ModuleLoggingProvider provider) {
+        // The system context is a single context: it has no node-profile →
+        // logging-profile associations, so its tab carries only the "Logging
+        // Profiles" panel (no "Assignments" sub-tab) — decision D5 / §5.
+        if (ModuleIds.SYSTEM.equals(provider.getModuleId())) {
+            return new ModuleLoggingProfilePanel(context, provider);
+        }
         JTabbedPane inner = new JTabbedPane();
         inner.addTab("Logging Profiles", new ModuleLoggingProfilePanel(context, provider));
         AssignmentPanel assignmentsPanel = new AssignmentPanel(context, provider);

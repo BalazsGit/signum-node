@@ -97,7 +97,7 @@ class NodeLoggingContextApplierTest {
         assertEquals("DEBUG", rootLevel(ctx), "L1 node.level=FINER maps to Log4j2 DEBUG");
         assertTrue(before.isDebugEnabled(),
                 "the pre-existing logger instance must re-bind to the new config (P0 Q2)");
-        assertTrue(before.getContext().getName().startsWith("signum-node-"),
+        assertTrue(before.getContext().getName().startsWith("node-"),
                 "the logger stays in the isolated node context");
     }
 
@@ -152,12 +152,45 @@ class NodeLoggingContextApplierTest {
         }
 
         String dir = NodeLoggingContextApplier.defaultFileLogDir(confRoot).replace('\\', '/');
-        assertTrue(dir.endsWith("logs/node"),
-                "the default file log dir is under {confRoot}/logs/node: " + dir);
+        assertEquals("logs/node", dir,
+                "the default file log dir is the portable RELATIVE logs/node (LoggingPaths SSOT, "
+                        + "OUTSIDE the configuration tree): " + dir);
         Properties l0Global = NodeLoggingContextApplier.loadL0Global();
         // no cross-contamination: the node module's own L0 is not in L0-global
         assertNull(l0Global.getProperty("node.level"),
                 "L0-global must not carry the node module's L0 keys");
+    }
+
+    @Test
+    @DisplayName("global layers: the SYSTEM L1 (conf/system/logging/default.properties) overlays the node L1")
+    void loadGlobalLayers_systemL1Wins() throws Exception {
+        // node L1: global class at WARN, node level FINE
+        writeL1(props("org.example.Gui.level", "WARN", "node.level", "FINE"));
+        // system L1: the same global class at ERROR (system scope has priority)
+        Path systemL1 = application.utils.config.LoggingPaths.systemL1File(confRoot.toString());
+        Files.createDirectories(systemL1.getParent());
+        try (var w = Files.newBufferedWriter(systemL1)) {
+            props("org.example.Gui.level", "ERROR").store(w, "system L1 test layer");
+        }
+        try {
+            NodeLoggingConfigResolver.Layers layers =
+                    NodeLoggingContextApplier.loadGlobalLayers(confRoot);
+            NodeLoggingConfigResolver.Resolved resolved = NodeLoggingConfigResolver.resolve(layers,
+                    NodeLoggingContextApplier.defaultFileLogDir(confRoot));
+            assertEquals("ERROR", resolved.globalLoggerLevels.get("org.example.Gui"),
+                    "the system L1 must win over the node L1 for global-scope keys");
+            assertEquals("DEBUG", resolved.nodeRootLevel,
+                    "the node L1 still drives the node root level (FINE -> DEBUG)");
+            // the NODE pipeline must NOT see the system L1 (node scope only)
+            NodeLoggingConfigResolver.Layers nodeLayers =
+                    NodeLoggingContextApplier.loadLayers(confRoot, null);
+            NodeLoggingConfigResolver.Resolved nodeResolved = NodeLoggingConfigResolver.resolve(nodeLayers,
+                    NodeLoggingContextApplier.defaultFileLogDir(confRoot));
+            assertEquals("WARN", nodeResolved.globalLoggerLevels.get("org.example.Gui"),
+                    "the node pipeline resolves only from the node L1 (no system L1 leak)");
+        } finally {
+            Files.deleteIfExists(systemL1);
+        }
     }
 
     /** Captures every bus event for assertions. */

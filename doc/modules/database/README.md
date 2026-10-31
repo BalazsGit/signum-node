@@ -7,7 +7,7 @@ The Database module provides abstracted data access for SQLite, MariaDB, and Pos
 
 ```
 Step 1: System base defaults
-       classpath:/conf/system/logging/logging-default.properties
+       classpath:/conf/system/logging/system-default.properties
 
 Step 2: Database profile defaults
        classpath:/conf/database/profiles/profile-default.properties

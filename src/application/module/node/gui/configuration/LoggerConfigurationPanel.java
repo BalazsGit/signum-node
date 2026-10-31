@@ -57,8 +57,7 @@ import org.slf4j.LoggerFactory;
 @Deprecated
 public class LoggerConfigurationPanel extends JPanel {
 
-    private static final String[] LOG_LEVELS = { "SEVERE", "WARNING", "INFO", "CONFIG", "FINE", "FINER", "FINEST",
-            "ALL", "OFF" };
+    private static final String[] LOG_LEVELS = { "ERROR", "WARN", "INFO", "DEBUG", "TRACE", "OFF" };
     private static final String[] COMMON_LOGGERS = {
             "brs", "node.http", "node.peer", "node.db", "node.crypto", "node.util",
             "org.eclipse.jetty", "javax.servlet", "com.zaxxer.hikari", "org.jooq", "sun.rmi"

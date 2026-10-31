@@ -1,6 +1,7 @@
 package application.module.logging.context;
 
 import application.module.logging.context.NodeLoggingConfigResolver.Resolved;
+import application.utils.config.LoggingPaths;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -10,12 +11,13 @@ import java.nio.file.StandardCopyOption;
 
 /**
  * Writes the generated Log4j2 .properties files into the runtime conf layout
- * (per-node isolated LoggerContext plan, §6.4).
+ * (per-node isolated LoggerContext plan, §6.4; the on-disk contract is owned
+ * by {@link LoggingPaths}).
  * <p>
- * On-disk contract:
+ * On-disk contract (SSOT: {@link LoggingPaths}):
  * <ul>
- *   <li>{@code {confRoot}/logging-runtime/global.log4j2.properties} — the
- *       global context configuration</li>
+ *   <li>{@code {confRoot}/system/logging/runtime/global.log4j2.properties} —
+ *       the global context configuration</li>
  *   <li>{@code {confRoot}/node/logging/runtime/{profile}.log4j2.properties}
  *       — the node context configuration of the given profile</li>
  * </ul>
@@ -51,21 +53,22 @@ public final class NodeLoggingConfigWriter {
 
     /**
      * Writes the global generated config to
-     * {@code {confRoot}/logging-runtime/global.log4j2.properties}.
+     * {@code {confRoot}/system/logging/runtime/global.log4j2.properties}
+     * (SSOT: {@link LoggingPaths#globalGeneratedFile(String)}).
      */
     public static Path writeGlobal(Path confRoot, Resolved resolved) throws IOException {
-        Path file = confRoot.resolve("logging-runtime").resolve("global.log4j2.properties");
+        Path file = LoggingPaths.globalGeneratedFile(confRoot.toString());
         writeAtomic(file, NodeLoggingConfigResolver.renderGlobalProperties(resolved));
         return file;
     }
 
     /**
      * Writes the node generated config to
-     * {@code {confRoot}/node/logging/runtime/{profile}.log4j2.properties}.
+     * {@code {confRoot}/node/logging/runtime/{profile}.log4j2.properties}
+     * (SSOT: {@link LoggingPaths#nodeGeneratedFile(String, String)}).
      */
     public static Path writeNode(Path confRoot, String profileName, Resolved resolved) throws IOException {
-        Path file = confRoot.resolve("node").resolve("logging")
-                .resolve("runtime").resolve(profileName + ".log4j2.properties");
+        Path file = LoggingPaths.nodeGeneratedFile(confRoot.toString(), profileName);
         writeAtomic(file, NodeLoggingConfigResolver.renderNodeProperties(resolved, profileName));
         return file;
     }

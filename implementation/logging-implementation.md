@@ -1,0 +1,594 @@
+# Logging implementation – follow-up terv
+
+> Készült: 2026-10-31 · Az `analizis/logging-analyzis.md` **follow-up-ja**: a feltett kérdésekre adott
+> magyarázatok, javaslatai és egy prioritizált implementációs terv. A jelenlegi kódbázis
+> (`Signum`, `NodeLoggingConfigResolver`, `LoggerImpl`, `GlobalLoggingApplier`, `LoggingPanel` stb.)
+> alapján íródott; minden állítás a tényleges kód alá támasztja.
+
+## 0. A kérdések gyorsválasza
+
+| # | Kérdés | Rövid válasz | Részlet |
+|---|--------|--------------|---------|
+| 1 | `signum-global` nevezés zavaró | Igaz; **`signum`-ot elhagyjuk**: global kontextus → **`system`**, node-kontextus → **`node-<profil>`**; a `Signum*` logging-osztályok → `NodeSystemContext*` (a csomagnév nem változik) | §1 |
+| 2 | A forward busz szintet vizsgálgat? | A busz `forward`-ja **nem** szűr, **DE** a forrás-gát a node kontextus `level`-e (L1): az alatta eldobott esemény a buszra/konzolra/fájlra **se** jut. A GUI-konzol szűrője **külön**, display-only | §2 |
+| 3 | Miért kell a generált `*log4j2.properties`? | Nem SSOT – a réteges modell „vázlata" a Log4j2 fájl-alapú `reconfigure()` API-jához. **Döntés: A (fájl marad) + teszt-takarítás** | §3 |
+| 4 | L* szintnevek egységesítése log4j2-re | **Igen, log4j2 lesz a saját szövegzetünk** (L0 + mindkét GUI-panel); a `log4j-jul` híd harmadik féli JUL-ért **marad**; `toLog4jLevel` kettős-tűrő marad | §4 |
+| 5 | System logging konfiguráló tab | Igen – a system **nem modul, hanem egyetlen alkalmazás-kontextus**; a node-mintára kap **profile-UI-t** (L0/L1, **nem** több profil/L2), hiányzik csak a `SystemLoggingProvider` | §5 |
+| 6 | Buffer/fájl/display config hova? | A GUI-konzol ma **több független limit** (char-buffer profile-ban, `maxConsoleLines` JSON-ban, `DEFAULT_MAX_LINES` kódban, esemény-buffer) → **egy SSOT-ra** a profile-ba (`console.maxLines`), a GUI onnan olvass | §6 |
+| 7 | `node.gui/profile/logging` miért nem a node-kontextusban? | Bootstrap-rend + shared GUI; **hibrid (C)**: per-node nézet → node-kontextus, shared → global. **Headless-safe**, a system-forward megmarad | §7 |
+| 8 | JUL még használjuk? | Nincsen a saját kódunkban (**0 `java.util.logging` import**); a `log4j-jul` híd csak harmadik féli lib-k JUL-logolása miatt **marad** (ez a konzisztens konszenzus) | §8 |
+
+---
+
+## 1. `signum` elhagyása: `system` / `node` (Q1)
+
+### 1.1. Mit jelent valójában a két szint-doménium
+
+A rendszerben **két, egymástól szint-visszajelzésben független** Log4j2 domén él (ez az a „halmaz"
+kép, amit leírtál):
+
+- **System / global domén** (a nagy halmaz): egyetlen JVM-szintű `LoggerContext`, azonosítója ma
+  `signum-global` (`SignumGlobalContextSelector.GLOBAL_CONTEXT_NAME`). A root-szintje és a global
+  osztály-szintjei **saját rétegsorral** állíthatók (L0-global `level` kulcs →
+  `conf/system/logging/default.properties` L1-system → generált `global.log4j2.properties`).
+- **Node domén** (alhalmaza): profilonként **izolált** `LoggerContext` (`signum-node-<profil>`),
+  mindegyik **saját** rétegsorral (L0-node → L1 → L2). Egy node-on lehet DEBUG, a másikon WARN –
+  egymástól elszigetelten.
+
+A tartalomtovábbítás a „nagy halmazba" a `ProfileLogger.forwardToSystem`-on (busz-réteg) történik:
+a node eseményei a node konzolba és onnan a System Console-ba is eljutnak, de a **szint-döntés** a
+saját (node) kontextusban történik, a system domén **nem** szűri őket újra. Tehát: *szintben
+független, tartalomtovábbításban hierarchikus* – pontosan az a modell, amit vártál.
+
+### 1.2. Miért zavaró a név, és egy tisztázandó félreértés
+
+- A `signum-global` az **alkalmazás JVM-szintű** („Signum app globális") kontextusát jelöli, **nem**
+  a „hardkodolt default-ot". A global kontextus **nem hardkodolt**: boot után (két fázis, a node-
+  hoz hasonlóan) root=INFO hardkodolt indul, az első `applyGlobal()`-tól pedig a generált
+  `global.log4j2.properties` a mérvadó.
+- A név a Log4j2 `LoggerContext` **azonosítója** (diagnosztika/dump-címke), **nem routing kulcs**
+  (D7): a selector `getContext(name, …)` minden nevet figyelmen kívül hagyva ugyanarra a kontextusra
+  mutat. **Ezért az átnevezés a routing viselkedését NEM változtatja** – csak a felismerhetőséget javítja.
+- Ma van egy **név-in konzisztencia**: a Log4j2 kontextus `signum-global`, de a busz (a
+  `SystemLogger`) neve `system`. Ez a kettőzött szövegzet a fő forrása a zavarban.
+
+### 1.3. Javaslat (EL DÖNTVE – a projekt elnevezésének jövőbeli cseréje miatt generikus név)
+
+| Elem | Mai | Új |
+|---|---|---|
+| Global kontextus név | `signum-global` | **`system`** (tisztán) |
+| Node-kontextus prefix | `signum-node-` | **`node-`** → `node-<profil>` |
+| No-op kontextus név | `signum-node-noop` | **`node-noop`** |
+| Kontextus-osztály | `SignumGlobalContext` | **`NodeSystemContext`** |
+| Selector-osztály | `SignumGlobalContextSelector` | **`NodeSystemContextSelector`** |
+| Kontans | `GLOBAL_CONTEXT_NAME = "signum-global"` | **`SYSTEM_CONTEXT_NAME = "system"`** |
+| Generált fájl fejléc | `# GENERATED by Signum` | **`# GENERATED by Node`** |
+
+- **Csak a logging-osztályok és a kontextusnév-sztringek** változnak; a **csomagutak nem**
+  (`application.module.logging.context` – nincs benne `signum`). A `Signum` **node-főosztály**
+  (`application.module.node.Signum`) **NEM** változik (az a blockchain node, nem logging).
+- A `Node` prefix = az általános „node alkalmazás" fogalom (projekt-független), a `System`
+  pedig az alkalmazás-szintű (egyetlen) kontextust jelöli – szemben a `node-<profil>` per-node
+  kontextusokkal.
+- **Kockázat: alacsony** – a név diagnosztikai, a routing nem változik (a selector minden nevet
+  figyelmen kívül hagy). Érintett forrás: `NodeSystemContext`, `NodeSystemContextSelector`,
+  `NodeLoggingContext` (`NAME_PREFIX`), `NodeLoggers` (`NOOP_CONTEXT_NAME`),
+  `NodeLoggingConfigResolver` (`GENERATED_HEADER`), `GlobalLoggingApplier`, `Launcher` + a tesztek.
+
+## 2. A forward busz szint-szűrése (Q2)
+
+### 2.1. Így van már: a busz NEM szűr szint szerint
+
+A kérdésed helyes – és a kód **pontosan így** implementálja. A hid (node-kontextus → busz) a
+`ModuleLogger.forward(…)` belépési pontot használja, amely **megkerüli a `minLevel` kaput**:
+
+- `ModuleLogger.forward` javadoc: *„Relays an event to the subscribers **WITHOUT applying this
+  logger's own minLevel gate** … the node's isolated Log4j2 `LoggerContext` is the **SOLE (native)
+  level gate** … The bus must therefore relay it as-is and **must NOT re-filter by level**."*
+- `LoggerImpl.forward(LogEvent)`: kommenttel *„NO minLevel check (P8/F2): the caller (the node's
+  isolated LoggerContext) is the sole native level gate."* → közvetlenül `dispatch(event)`.
+- A `SystemLogger` **mindig TRACE-t** fogad (`setLogLevel` felülírva, ráerőszakolja TRACE-t), mert a
+  terminál tükre – senkit ne hagyjon ki. A szűrés a **feliratkozókon** történik (a GUI konzol saját
+  `ConsoleSettings.minLogLevel` szűrője), nem a buszon.
+
+Tehát a **szint egyetlen kapuja** a Log4j2 kontextus konfigja (node-kontextus vagy global-kontextus).
+Ha a kontextus nem bocsátotta ki (pl. DEBUG kikapcsolva), az esemény sehol nem jelenik meg – a buszok
+már „utána" csak továbbítanak. A `forwardToSystem` szintén nem kapuzza újra.
+
+### 2.2. Egy árnyalat (hogy ne legyen félreértés)
+
+A `ProfileLogger`-nek **van** `minLevel` mezője, de azt csak a **saját `log(…)` hívásainál**
+(egyenes modul-logolás, nem a hid) használja. A **hid-út** (`forward`) ezt megkerüli – így a
+node-kontextus → node-konzol → system-konzol úton **nem keletkezik dupla szint-szűrés**. Ez az az elv,
+amit leírtál: *a busz simán mindent továbbít, szintet nem vizsgálgat.*
+
+### 2.3. FONTOS – két KÜLÖN szint-mechanizmus van (a kérdésre)
+
+A „a minLevel csak a saját console megjelenítését szűri?" kérdésre a pontos válasz: **nem egy,
+hanem két külön mechanizmus** működik, és a te modellod a **másodikkal** (display) egyezik, de az
+**első** (forrás-gát) miatt az nem teljes képet ad:
+
+| # | Mechanizmus | Hol | Mit csinál | „Visszaállítás után megjelenik, ami közben elment?" |
+|---|---|---|---|---|
+| 1 | **Forrás-gát** = a node kontextus `level` (L1) | a node izolált Log4j2 `LoggerContext` root-szintje | a szint **alatti** eseményt a forrásban **soha nem is létrehozza** | **NEM** – az eldobott esemény a buszra, a node-konzolra, a systemre **és a fájl-logra se** jut; nem tárolódik |
+| 2 | **Display-szűrő** = a GUI-konzol `LogFilter` | `BaseConsoleSubscriber` (a konzol-feliratkozó) | a már megérkezett sorokat **megőrzi** (soronként `LEVEL_ATTRIBUTE`-tal) és **láthatóságot kapcsol** | **IGEN** (a `maxLines` határig) – a korábban elrejtett, de megőrzött sorok visszajelennek |
+
+Következmények (ezért **nem** pusztán „vizualizáció"):
+- A node-szint (L1) **nem** display-filter: egy WARN-ra állított node **nem forwardel** DEBUG/INFO-t
+  a systemre sem – a „system = mindenkori teljes nyilvántartás" állítás **pontatlan**: a system
+  csupán minden node **L1+-es** eseményeit látja (forrás-ban korlátozva).
+- A „visszaállítom a szűrést, és megjelennek a közben befutottak" **csak a display-szűrőre (2)** igaz
+  – és csak addig, amíg a sor a konzol `maxLines`-es memóriájában épp ott van. Ha L1 (1) dobta el,
+  akkor semmi nem jelenik meg, mert az esemény sosem létezett.
+- **Kódmódosítás: nem kell** (ez a jelenlegi, szándékos viselkedés). Ha viszont a „system ténylegesen
+  minden node teljes nyilvántartása legyen" igény éles, akkor **tervezési döntés**: a node-kontextus
+  root-ja TRACE-n maradjon (mindent forwardel), a per-node szintet csak display-szűrőként alkalmazzuk –
+  ez több esemény-kiosztás = több overhead. Jelenlegi állás: L1 maradjon forrás-gát.
+
+---
+
+## 3. A generált `*log4j2.properties` fájlok szerepe (Q3)
+
+### 3.1. Miért léteznek, ha a rétegek (L0→L1→L2) a forrás?
+
+A generált fájlok **nem SSOT** (az SSOT a réteges kulcs-érték modell + a rendeltetés). Ők a réteges
+modell **vázlata/projekciója** a Log4j2 **fájl-alapú konfigurációs API-jába**:
+
+- A Log4j2 `LoggerContext(name, classLoader, configUri)` konstruktor és a `reconfigure()`
+  **konfigurációs forrásból** (URI vagy `Configuration` objektum) dolgozik.
+- A **2.26.1-en nincs** `reconfigure(URI)` (kontextusváltás), ezért a helyszíni Apply-út **fájlt ír,
+  aztán** `reconfigure()` (azonos fájl) vagy `ConfigurationSource.fromUri` alapján épített
+  `PropertiesConfiguration`-t alkalmaz (`SignumGlobalContext.reconfigureFrom`).
+- A réteges modell (emberi szerkeszthető, verziózható) és a Log4j2 futásidejű konfig **különböző
+  formátumok** – a generált fájl ez kettő közötti hid.
+
+A fájlok célja kettő: (a) a kontextus-alkotásnak és a `reconfigure()`-nek **determinisztikus** forrás
+legyen, (b) **debugelhetőség** – nyitva lehet látni, pontosan mi aktív épp most a kontextusban.
+
+### 3.2. Lehetséges-e a fájl elhagyása?
+
+**Igen, elvileg.** A Log4j2 támogatja a `ConfigurationSource.fromStream(InputStream)`-ot: a
+`NodeLoggingConfigResolver` által generált tartalmat **memóriában** (bájt-potokként)
+`PropertiesConfiguration`-ba lehet tölteni és `reconfigure(configuration)`-vel élesíteni –
+**disk-írás nélkül**.
+
+| Opció | Előny | Hátrány |
+|---|---|---|
+| **A: fájl marad** (jelenlegi) – **EL DÖNTVE** | Debug: látszik a „ground truth" aktív konfig; determinisztikus reconfigure-forrás | Disk-írás; a `conf/*/logging/runtime/` **szennyeződhet** → **takarítjuk** (§3.3) |
+| **B: in-memó stream** | Tiszta disk, nincs generált fájl-szennyezés | Elveszik a „nyitható aktív-konfig" snapshotot |
+| **C: hibrid** | Live reconfigure in-memóból; fájl csak debug-címkére / kérésre íródik | Kisebb extra kód; most felesleges (később újragondolható) |
+
+### 3.3. Konkrét megfigyelés: teszt-szennyezés
+
+A `conf/node/logging/runtime/` alatt **sok teszt generálta** fájl maradt (`adoption-test-*`,
+`attach-test-*`, `conflict-*`, `late-bind-*`, `late-wire-*` …). Ez a „fájl-alapú" modell mellékhatása:
+a tesztek is a valódi runtime-csomagra írtak. Függetlenül az A/B/C választástól, ez **takarítandó**
+(tesztek `@TempDir` conf-root-ja + start-up cleanup a régi `*.log4j2.properties`-re).
+
+> **Döntés (Q3): A + takarítás.** A generált fájl **marad** (debug-értéke nagy). A takarítás (F0):
+> (1) a `conf/*/logging/runtime/` git-ignored marad, start-upkor **tisztítjuk** a futó profiloknak
+> nem megfelelő `*.log4j2.properties` fájlokat; (2) a **tesztek saját, ideiglenes** (`@TempDir`)
+> conf-rootot használjanak, ne a valós `conf/`-t. A **C (in-memó) később** újragondolható – most nem
+> kell (a fájl marad).
+
+### 3.4. A resolver csak nevet fordít? (a 3-as al-kérdés)
+
+**Nem – a `NodeLoggingConfigResolver` nem pusztán szint-nevet konvertál.** Két külön feladata van:
+
+1. **Névenormalizálás** (`toLog4jLevel`): JUL **és** log4j2 szövegezet elfogad → log4j2 kimenet.
+   Ha az L0/L1/L2 rétegek már **mind log4j2**-nevet tárolnának, ez az ág **átmenetileg holtág**
+   marad (defenzív, ismeretlen→`INFO`) – de a §4 döntése szerint a saját rétegeinket **log4j2-re**
+   állítjuk, így ez ténylegesen csak védekező maradék lesz.
+2. **Rétegzés + renderelés** (a valódi munka): az L0/L1/L2 **határeset** (pl. `node.level`:
+   L2→L1→L0→global), a **osztály-birtoklás** (`isNodeMotorClass`), a „csak ha override" szabály,
+   a RollingFile/Console appender generálása. **Ez a névfüggetlen** – log4j2-s rétegeknél is **kell**.
+
+Tehát: „ha L0/L1/L2 log4j2 lenne, nem kellene?" → a **név-átírás** részben feleslegessé válik, de a
+**rétegző+renderelő** resolver **marad** (a generált fájl forrása). A két szerep különválasztásáról a
+§4 dönt a konszenzus.
+
+## 4. L* szintnevek egységesítése log4j2-re (Q4)
+
+### 4.1. Jelenlegi állapot (JUL szövegzet maradék)
+
+A migráció előtti JUL-korszak szövegzete **két helyen is** megmaradt:
+
+| Hely | Mai tartalom | Típus |
+|---|---|---|
+| `NodeLoggingProfile.getDefaults()` (L0) | `.level=SEVERE`, `node.level=INFO`, `org.eclipse.jetty.level=OFF`, `java.util.logging.ConsoleHandler.level=ALL`, `com.zaxxer.hikari.level=WARNING`, stb. | **JUL nevek** |
+| `ModuleLoggingProfilePanel.LOG_LEVELS` (GUI dropdown) | `{"SEVERE","WARNING","INFO","CONFIG","FINE","FINER","FINEST","ALL","OFF"}` | **JUL nevek** |
+| `NodeLoggingConfigResolver.toLog4jLevel` | mappol: `FINEST/ALL→TRACE`, `FINER/FINE→DEBUG`, `CONFIG/INFO→INFO`, `WARNING/WARN→WARN`, `SEVERE/ERROR→ERROR`, `OFF→OFF`, ismertetlen→`INFO` | JUL **és** log4j2-t is elfogad |
+
+A generált fájl már **log4j2** nevet kap (pl. `rootLogger.level = INFO`), a rétegfájlok viszont
+JUL-t tárolnak. Ez nem hibás (a mappolás mindkettőt elfogad), de **inkonzisztens és zavaró** –
+ezt akartad egységesíteni.
+
+### 4.2. Javaslat: IGEN, egységesítsük log4j2-re
+
+1. **L0 defaultok átvitele log4j2 nevre** (minden modul: `NodeLoggingProfile`,
+   `DatabaseLoggingProvider`, `BrowserLoggingProvider`, a legacy `LoggerProfile`):
+
+   | Mai (JUL) | Új (log4j2) |
+   |---|---|
+   | `SEVERE` | `ERROR` |
+   | `WARNING` | `WARN` |
+   | `INFO` / `CONFIG` | `INFO` |
+   | `FINE` / `FINER` | `DEBUG` |
+   | `FINEST` / `ALL` | `TRACE` |
+   | `OFF` | `OFF` |
+
+2. **GUI `LOG_LEVELS` cseréje** log4j2-re: `{"OFF","ERROR","WARN","INFO","DEBUG","TRACE"}`.
+   (A sorrend súlyosság szerint; a „log level" checkbox-ú sorok így log4j2 szintet kínálnak.)
+
+3. **`toLog4jLevel` maradjon kettős-tűrő** (JUL **és** log4j2): ez a **háttér-kompatibilitás** – a
+   felhasználók meglévő L1/L2 fájlaiban JUL nevek állhatnak, és azokat átlátszóan mappoljuk.
+   (Opcionális: L1/L2 betöltéskor egyszeri, átlátszó JUL→log4j2 migrálás + log.)
+
+4. **Holt JUL-only kulcsok törlése L0-ból** (a resolver ezeket **nem** rendereli, Log4j2-jelentőségük
+   nincs): `handlers`, `.level` (a JUL root), `java.util.logging.*` (ConsoleHandler formatter/level).
+   Ezek a P3 migráció után **pura legacy**.
+   > Figyelem: a global root-szinthez a `level` kulcs (`KEY_GLOBAL_LEVEL`) a hivatalos, a `.level`
+   > (JUL root) nem – így a `.level=SEVERE` L0-ban ténylegesen holt kulcs.
+
+### 4.3. Kockázat és teszt
+
+- **Alacsony**: a `toLog4jLevel` és a resolver `NodeLoggingConfigResolverTest`-jei fedik; a mappolás
+  már ma elfogadja mindkét szövegzetet, tehát a GUI/L0 log4j2-re cseréje nem tör semmit.
+- **Ütemezendő**: a GUI-csere (`LOG_LEVELS`) és az L0-csere együtt; a `toLog4jLevel` kettős-tűrése
+  **utána is** maradjon (meglévő user-fájlok miatt).
+
+### 4.4. Konzisztens architektúra – konszenzus (a 4-es pont, „ami a legtisztább")
+
+> Megjegyzés: ma **két** GUI-panel is JUL `LOG_LEVELS`-t használ: a **új**
+> `ModuleLoggingProfilePanel` ÉS a **legacy** `LoggerConfigurationPanel` (`node.gui.configuration`).
+
+**A legtisztabb, konzisztens modell** (mivel a logging-file-ek még nem release-eltek → ez a mi
+architektúránk):
+
+1. **A saját szövegezetünk = log4j2** (`ERROR/WARN/INFO/DEBUG/TRACE/OFF`). Mindenhol, ahol **mi**
+   tárolunk/állítunk szintet: L0-defaultok (`NodeLoggingProfile`, `DatabaseLoggingProvider`,
+   `BrowserLoggingProvider`, legacy `LoggerProfile`) **és** mindkét GUI-panel `LOG_LEVELS`-e.
+2. **A `log4j-jul` binder MARAD** – ez a **harmadik féli** lib-ok JUL-logolásának a Log4j2-be (a
+   `system` kontextusba) konvergálására van. Ez a **saját** szint-szövegezettől **független**: a
+   binder a runtime-hívásokat fogja, nem a config-fájljaink szövegét. Tehát „harmadik fél JUL-ban
+   logol" → a binder megoldja, **saját** JUL-szöveget **nem** kell használnunk.
+3. **A `toLog4jLevel` kettős-tűrő marad** (JUL + log4j2): (a) védekező, (b) a meglévő L1/L2
+   user-fájlba írhat JUL-nev; a mappolás átlátszó. Ez a „GUI-szűréshez JUL is kellene"-es aggodalom
+   **nem** éles: a GUI a **Log4j2-eseményekre** szűr (a busz/binder már log4j2-be hozta a JUL-t),
+   nem a tárolt szövegre – a display-szűrés így log4j2-szinteken működik.
+
+**Összegezés (konszenzus):** *mi* log4j2-n logolunk (saját config = log4j2 szöveg); a *harmadik
+féli* JUL a `log4j-jul` hídon keresztül log4j2-be kerül; a `toLog4jLevel` kettős-tűrővé marad.
+Ez egységes, és nem hagy félressze sem a saját, sem a külső logolást.
+
+---
+
+## 5. System logging konfiguráló tab (Q5)
+
+### 5.1. Mennyi új kell hozzá? (már megvan a legtöbb)
+
+| Rész | Állapot |
+|---|---|
+| `ModuleIds.SYSTEM = "system"` | **Már létezik** |
+| `LoggingPaths` system-pályák (`conf/system/logging/`, `logs/system/`, `runtime/global.log4j2.properties`) | **Már léteznek** |
+| `NodeLoggingContextApplier.loadL1System` (L1-system olvasó) | **Már létezik** |
+| `GlobalLoggingApplier` (global Apply: resolve → generált global fájl → global kontextus reconfigure → global híd-újracsatolás → futó node-ok re-apply) | **Már létezik** |
+| `SystemLoggingProvider`/`SystemLoggingProfile` (L0 defaultok a global kontextushoz) regisztrálva a `LoggingModuleRegistry`-ben | **Hiányzik** |
+
+A `LoggingPanel` **dinamikusan** tabot hoz létre **minden regisztrált provider**hez (a
+`registry.getAllProviders()`-t végigiterálja, `LoggingModuleRegistry` observer-re bővül). Tehát
+**egyetlen regisztráció** (`LoggingModuleRegistry.register(new SystemLoggingProvider())`)
+automatikusan előhozza a „system" tabot – a GUI-munka **szinte ingyen van**.
+
+### 5.2. A system **nem modul** – egyetlen alkalmazás-kontextus (a 5-ös pont)
+
+A `system` a **system(application) kontextus**: **pontosan egy** létezik, **nem lehet** többet
+lejáratni (szemben a node-profilokkal), és **nem** egy „modul". A provider-regisztráció (`ModuleIds.SYSTEM`)
+csak a **profile-szerkesztési felület** előhozásához kell – maga a `system` az alkalmazás egyetlen,
+JVM-szintű kontextusa. A node-mintára kap **profile-UI-t**, de **nem több profil**:
+
+- **Nincs L2 / Assignments a systemnek**: a `LoggingAssignmentStore` a *node-profil → logging-profil*
+  mappinget tárolja; a systemhez „profilra rendelt" réteg nincs. → A „system" tab **Assignments**
+  sub-tab-ja **N/A** → **elrejtjük**. A system tab = az **egyetlen** system profil szerkesztése
+  (L0-referencia + L1-edit réteg + global-osztály-override-ek).
+- A system root-szint **egyetlen** `level` kulcs (nem per-node).
+- A **system console-limits** (maxLines/buffer) is ide kerül a **§6** szerint (`console.maxLines`) –
+  így a system GUI-konzol megjelenése is **egyetlen helyen** (a system profile-ban) állítható.
+- A system tab Apply-e a `GlobalLoggingApplier.applyGlobal()`-t hívja – ez **élben** reconfiguriálja a
+  system kontextust **és** propagálja a futó node-okba (a node fájlok beágyazzák a global rétegeket).
+  Tehát a system-beállítás **azonnal**, újraindítás nélkül hat.
+
+### 5.3. Javaslat + lépések
+
+1. `SystemLoggingProvider`/`SystemLoggingProfile`: modul-id `system`, L0 defaultok (global root
+   `level`, harmadik féli lib-zaj csillapítása, és – ha a §6 elfogadod – a `logging.buffer.*` kulcsok).
+2. Regisztráció a `LoggingModule` `start()`-jában (mint a Node/Database).
+3. `ModuleLoggingProfilePanel`: `system`-hez elrejtik az **Assignments** sub-tab-ot (vagy
+   „System Defaults"-ra nevezik át); az Apply-gomb `GlobalLoggingApplier`-re mutat.
+4. A system L0-referencia sablon (a `logging-default` mintájára) a classpath-re kerül
+   (`application/config/system/logging/…`), a `syncDefaultFileFromClasspath` mintájára.
+
+> **Érdemes-e?** Igen: a global szint ma csak fájlban/CLI-vel érhető el; a tab egy **első osztályú**,
+> a node-mintára szimmetrikus felület. Mellékhatás minimális (egyetlen provider + egy sub-tab rejtése).
+
+## 6. Buffer / fájl / display konfiguráció: hova, profile vagy hardcoded? (Q6)
+
+### 6.1. Jelenlegi „gombok" (hol él, default, profile-override?)
+
+| Gomb | Hol | Default | Profile-override? |
+|---|---|---|---|
+| Node fájl-log (Log4j2 RollingFile `nodefile`) | logging-profil `node.fileLog.enable/dir/level/size/max` → generált fájl | `true / logs/node / INFO / 10MB / 5` | ✅ L0→L1→L2 |
+| Per-node busz-fájl (`ProfileFileAppender`, `{dir}/{profile}.log`) | **node-profil** `Props.FILE_LOG_ENABLE/DIR/LEVEL/LIMIT/COUNT` (a `Signum.attachProfileFileAppender`) | (node-profil defaultok) | ✅ (de **külön** forrás, lásd 6.3) |
+| GUI konzol buffer (karakter) | logging-profil `node.gui.consoleLogSize` (fogyasztó: `LoggerConfigurationPanel`) | `100000` | ✅ |
+| GUI max sor (a konzol memóriája) | **user-JSON** `ConsoleSettings.maxConsoleLines` (nem logging-profil) | `1000` | ❌ (user-preferencia) |
+| SystemLogger ring buffer (replay) | **hardcoded** `SystemLogger.BUFFER_SIZE` | `500` | ❌ |
+| ProfileLogger replay buffer | **hardcoded** `ProfileLogger.DEFAULT_REPLAY_CAPACITY` (3-arg ctor) | `500` | ❌ |
+| Bootstrap buffer (indulási sorok) | **hardcoded** `BootstrapLogBuffer.DEFAULT_CAPACITY` | `500` | ❌ |
+
+Tehát a te említésed: a **10MB-os korlát és a fájl-szám már** profile-látható
+(`node.fileLog.size` / `node.fileLog.max`), de a **busz-buffer méretek** (500/500/500) ma
+**hardcodedek**.
+
+### 6.2. Javaslat: `logging.buffer.*` kulcsok (L0 default + L1/L2 override)
+
+A hardcoded busz-buffereket **profile-konfigurálhatókká** tegyük, ugyanazon a réteges mintán:
+
+| Kulcs | Cél | Ajánlott default | Fogyasztási pont |
+|---|---|---|---|
+| `logging.buffer.bootstrap` | `BootstrapLogBuffer` kapacitás | `500` | bootstrap (korai – lásd kockázat) |
+| `logging.buffer.system` | `SystemLogger` ring buffer | `500` | `SystemLogger` (config utáni) |
+| `logging.buffer.replay` | `ProfileLogger` replay kapacitás | `500` | `ProfileLogger` / `NodeLoggerRegistry` |
+
+- Ezek a **system** L0-profilba (ha a §5 elfogadod) vagy a **node** L0-profilba kerülnek, és
+  L1/L2-ben felülírhatók. A `SystemLogger`/`ProfileLogger`-hez egy egyszerű „effective value"
+  olvasó kell a létrehozás előtt.
+- **Bootstrap kockázat:** a bootstrap buffer **nagyon korán** jön létre (a config-rendszer előtt).
+  L1/L2-olvasáshoz egy minimális, önellátó properties-olvasás kellene. → **Ajánlás:** a bootstrap
+  buffer **maradjon a hardkodolt 500-nál** (átmeneti, ritkán finomítandó); a `system`/`replay`
+  buffer legyen profile-konfigurálható (már config-alatt készülnek).
+
+### 6.3. Konszolidációs javaslat: a node-fájl-log **kettős forrása**
+
+A node-fájl-log ma **két helyen** van beállítva, átfedő jelentésgel:
+
+1. **Logging-profil** `node.fileLog.*` → a **Log4j2 RollingFile** `nodefile` appender (generált fájl).
+2. **Node-profil** `Props.FILE_LOG_*` → a **busz-szintű** `ProfileFileAppender`.
+
+Ez duplikáció: két fájl-log mechanizmus, két config-forrás. **Javaslat:** egy forrásra (SSOT)
+konszolidálni – pl. a **logging-profil** `node.fileLog.*` legyen az egyetlen SSOT, a
+`ProfileFileAppender` a logging-profil effective értékeit vegye; a node-profil `Props.FILE_LOG_*`
+legyen csak átíró/kompat. Ez tisztítja a „fájl-log hol beállítható?" kérdést.
+
+### 6.4. A GUI-konzol buffer/maxLines **csak a GUI-konzolt** érinti (a 6-os pont)
+
+**Igen.** A konzol „buffer" és „max sor" kizárólag a **GUI-konzol megjelenését** (a `StyledDocument`
+méretét és a replay-hez megőrzött eseményeket) befolyásolja:
+
+- **NEM** érinti a **fájl-logot** (az a Log4j2 `RollingFile` `nodefile` appender, saját
+  `size`/`max` rolloverrel, teljesen külön).
+- **NEM** érinti a **forward-út** semmit: a busz mindent továbbít, amit a forrás (L1) enged; a konzol
+  mérete csak azt határozza meg, hogy **mennyit mutat/megőriz** a GUI.
+
+### 6.5. AZ INKONSZISTENCIA és az egy-SSOT egységesítés (a 6-os pont fő kérése)
+
+**A te félelmed jogos: ma Több, egymástól független limit hat ugyanarra a GUI-konzolra** – és ez
+pont azért zavaros, mert nehéz utólag meghatározni, *mi és hol* korlátoz:
+
+| # | Limit | Hol él | Default | Mérték |
+|---|---|---|---|---|
+| a | `node.gui.consoleLogSize` | **logging-profil** (L0) | `100000` | **karakter** (dokumentum-cap) |
+| b | `ConsoleSettings.maxConsoleLines` | **user-JSON** (gui-settings) | `1000` | **sor** |
+| c | `BaseConsoleSubscriber.DEFAULT_MAX_LINES` | kódban (absztrakt) | `500` | sor |
+| d | `ProfileConsoleSubscriber.DEFAULT_MAX_LINES` | kódban (node-konzol) | `500` | sor |
+| e | `SystemConsoleSubscriber.DEFAULT_MAX_LINES` | kódban (system-konzol) | `1000` | sor |
+| f | `ConsolePanelConfiguration.getMaxLines()` | panel-konfig (unified console) | (a b/c/d/e-egyikből) | sor |
+| g | `SystemLogger.BUFFER_SIZE` / `ProfileLogger` replay | kódban (busz) | `500` / `500` | **esemény** (replay) |
+
+**Javaslat – EGYETLEN forrás a logging-profile-ba:**
+
+1. **`console.maxLines`** (system) a **system profile**-ba, **`node.console.maxLines`** (node) a **node
+   profile** L0-ba (L1 per-node override). **Ez az egyetlen „mennyi sort mutasson a konzol" SSOT.**
+2. A GUI-konzol ezt **a kontextus effectív profile-értékéből** olvassa (a system-konzol a system
+   profileból, a node-konzol a saját node profileból). **Nem** a JSON `maxConsoleLines`-ből.
+3. **A `ConsoleSettings.maxConsoleLines` (JSON) kiszorításra kerül** (release előtt → tiszta migrálás;
+   ha kell, egy ideig olvasó-kompat marad, de írásból kivissza). A kódbeli `DEFAULT_MAX_LINES`-ek
+   csupán **fallback** maradnak (ha a profile nem ad értéket).
+4. **A karakter-cap (`consoleLogSize`) és az esemény-replay-buffer (g) a `maxLines`-ból levezetett**
+   (pl. buffer = `maxLines`, char-cap = `maxLines × ~80`), hogy **ne 5 helyen** állítható legyen ugyanaz.
+5. Eredmény: **1 helyen** (a logging-profile-ban) van definiálva, hogy mennyi sor jelenjen meg a
+   konzolon; a GUI **nem korlátoz** külön `maxConsoleLines`-szal → nincs kétforrású inkonzisztencia.
+
+> **Döntés (Q6):** (1) `console.maxLines` / `node.console.maxLines` **egy SSOT** a profile-ba + a GUI
+> onnan olvas (a JSON `maxConsoleLines` kiszorul); (2) `logging.buffer.*` kulcsok a busz-bufferhez
+> (bootstrap maradjon hardcoded); (3) a node-fájl-log **egy SSOT-ra** (a §6.3). Mind a három a
+> „minden logging-releváns beállítás a logging-profile-ban, a hardcoded-eket felüldefiniálva" elvet
+> követi – a rétegzéssel (`L0 → L1 → L2`) összhangban.
+
+## 7. `node.gui` / `node.profile` / `node.logging` – miért nem a node-kontextusban? (Q7)
+
+### 7.1. Jelenlegi routing és az okai
+
+A `NodeLoggingConfigResolver.isNodeMotorClass` a `application.module.node.**`-t node-kontextusba
+rendeli, **kivéve** a `node.gui.`, `node.profile.`, `node.logging.` prefixeket – ezek a **global**
+kontextushoz tartoznak. Okai:
+
+- **`node.logging.`** – a log-infrastruktúra **magá** hozza létre/kezele a node-kontextusokat.
+  Nem tudna az adott node-kontextusba logolni, amit **magá** hoz létre (tojás-tyúkos / bootstrap-
+  sorrend). → logikaileg **kell** globalnak lennie.
+- **`node.profile.`** – a profilbetöltés-infrastruktúra hasonlóan **korán** fut (a node-setup
+  részeként), a node-kontextus léte előtt. → global.
+- **`node.gui.`** – a GUI/konzol réteg **shared** több node felett (egy GUI mutat több node-ot).
+  A Node Console egy **per-profil nézet**, ami a profil `ProfileLogger`-ére iratkozik fel; maga a
+  GUI-kód egyetlen node-kontextushoz **nem** rendelődik. → ma global (ezért a System Console-ban
+  jelenik meg, nem a per-node konzolban).
+
+### 7.2. A te elvárod ésszerű – a hézag és az opciók
+
+A te elvárad (node-GUI teszt közben a GUI-logok a **node profile konzol**-jában látszódjanak)
+érthető. Fontos: ma a GUI-logok **nem vésznek el** – a `forwardToSystem` miatt a **System Console-
+ban látszanak** (ahol mindent látunk). A hézag csupán, hogy **nem a per-node konzolban** jelennek meg.
+
+| Opció | Mit tud | Kockázat / költség |
+|---|---|---|
+| **A: maradjon global** (jelenlegi) | Egyszerű; GUI-log a System Console-ban | Nincs per-node GUI-láthatóság |
+| **B: `node.gui.` → node** | GUI-log a node-konzolban | A **shared** GUI komponensek nem birtokolnak egy node-kontextust → csak a **per-node-nézet** kóddal működik; shared részeknél elbuktat |
+| **C: hibrid / dinamikus routing** (ajánlott) | A **per-node nézet** kóddal a node-kontextusba, a shared GUI-rendszer a globalba | Közepes: a GUI-rétegben kell egy „aktuális node-kontextus" kötöttség |
+
+### 7.3. Javaslat
+
+- **`node.logging.` és `node.profile.`: maradjon global** – helyes (bootstrap-infrastruktúra).
+- **`node.gui.`**: **C (hibrid)**: a **shared GUI-infrastruktúra** (a konzol-motor, a formázó)
+  marad global; a **per-node nézet**-s kód (pl. egy adott node konzol-tab, a node profil-paneljei)
+  **az adott node `NodeLoggers`-én** logol, amikor birtokolja azt. Így a node-GUI fejlesztés közben a
+  per-node konzolban látod a releváns GUI-logokat, a shared réteg a System Console-ban marad.
+- Ha a C túl nagy befektetés, a **B részleges** (csak a ténylegesen per-node komponens átköltözik a
+  node-kontextusra) is lefedi a fő igényt.
+
+> **Döntés (EL DÖNTVE): C (hibrid).** Lefedt a feltétel – lásd a §7.4 alatti headless/forward-vizsgálat.
+
+### 7.4. Vizsgálat: headless + system-forward (a 7-es pont feltétele)
+
+Két dolgot kellett tisztázni, mielőtt a C-t vehetjük: **(1) nem ütközik-e a headless futtatással,
+(2) a systemre tovább-e a logok ugyanúgy.**
+
+**(1) Headless: SAFE.** Headless módban **nem indul GUI-modul**, tehát `node.gui.*` osztály **nem
+logol semmit** (nincs, aki logolna). A C routing (per-node GUI → node-kontextus) headlessban
+**üres halmaz** – nulla hatással van. A node motor (`node.level` gate), a node-fájl-log és a
+`ProfileLogger.forwardToSystem` **GUI-függetlenül** működik tovább, így a headless node viselkedése
+**változatlan**.
+
+**(2) System-forward: MEGMARAD.** A C-vel a per-node GUI-esemény a **node-kontextusba** kerül; a
+node-kontextus eseményei a `ConsoleBusAppender` → `ProfileLogger.forward(…)` úton a `SystemLogger`-be
+és onnan a **System Console**-ba továbbítják (`forwardToSystem=true`, a §2 szerint). Tehát a
+node-GUI-logok **a node-konzolban ÉS a System Console-ban** is látszanak – a „systemre továbbítják"
+elvárás teljesül. (Megjegyzés: a C-vel ezek **a node L1-gát alá** esnek – ha a node WARN, a
+node-GUI INFO-el nem jelenik meg sehol; ez a §2 forrás-gát viselkedésének következménye.)
+
+**Árnyalat (implementáció):** a Log4j2 routing **osztály-alapú** (a logger név = osztály FQCN), nem
+**példány-alapú**. Egy *shared* GUI-osztály (pl. `ProfileConsoleSubscriber`) minden node-nál ugyanazt
+a logger-t kapna. A C-hoz ezért a **per-node nézet**-s komponensnek **az adott node `NodeLoggers`-én**
+kell logolnia (a node-kontextus-kötött logger), nem a statikus/global logger-en. Ez a C-t a tisztán
+konfig-csere után egy **kisebb GUI-rétegi** módosítást tesz (azok a komponensek, amelyek birtokolnak
+egy node-kontextust, azt használják).
+
+## 8. A JUL még használatban van? (Q8)
+
+| Szempont | Állapot |
+|---|---|
+| Saját kódunk `java.util.logging` használata | **NINCS** – a `src`-ben **0** `import java.util.logging.*` |
+| `log4j-jul` binder a classpath-en | **MARAD** – harmadik féli lib-ok JUL-logolását a `signum-global`-ba konvergálja (ez a P3.5 binding-csere része) |
+| JUL-neveket a configban | **ELTŰNTETJÜK** (a §4 döntése): a saját L0-defaultok és mindkét GUI `LOG_LEVELS` → **log4j2** szöveg; a `toLog4jLevel` kettős-tűrő marad (defenzív) |
+| Legacy `SystemLoggerJulHandler` | **Már nem települ** (a `ProfileLogger.forwardToSystem` a egyetlen node→System Console út) |
+
+**Összefoglaló:** JUL mint **log-implementáció** nincs; JUL mint **szint-nev-ésszavár** a config-
+fájlokban maradt (a §4 tisztítja); JUL mint **híd** a `log4j-jul` binder formájában a harmadik
+féli lib-okért megmarad.
+
+---
+
+## 9. Prioritizált implementációs terv (a döntések alapján)
+
+> Rendezés: előbb az **alacsony kockázatú, magyarázó-értékű** elemek, majd a nagyobb feature-ek.
+> Minden fázis önállóan build + teszttel, visszavonható.
+
+### F0 – Teszt-szennyezés takarítása (Q3) · alacsony · ✅ RÉSZBEN KÉSZ
+1. A `conf/*/logging/runtime/` git-ignored; **start-upkor** a futó profiloknak nem megfelelő
+   `*.log4j2.properties`-ek törlése.
+2. A logging-context **tesztek** `@TempDir` conf-rootot használjanak (ne a valós `conf/`-t).
+   - **Visszavonhatóság:** 100% (nincs viselkedés-változás).
+
+   **Státusz (2026-10-31):** a felhalmozott szennyeződés **eltávolítva** (`conf/node/profiles.json`
+   baseline-visszaállítva, `conf/node/logging/runtime/` + a ~127 `conf/node/profiles/*.properties`
+   szemet törölve; a `default`/`node-default`/`node` baseline megmaradt). A **teszt-izoláció (F0b)**
+   a ~26 hardkódolt `conf` root-ú GUI/node-teszt `@TempDir`-re költözése — külön, jól körülhatárolt
+   követő-lépés (a `NodeLoggingConfigResolverTest` már izolált).
+
+### F1 – Szintnevek egységesítése log4j2-re (Q4) · alacsony · ✅ KÉSZ
+1. L0-defaultok JUL→log4j2 (Node/Database/Browser + legacy `LoggerProfile`).
+2. **Mindkét** GUI-panel `LOG_LEVELS` → log4j2: `ModuleLoggingProfilePanel` **és**
+   `LoggerConfigurationPanel`.
+3. `toLog4jLevel` **marad kettős-tűrő** (defenzív, §4.4) – változatlan.
+4. Holt JUL-only kulcsok (`handlers`, `.level`, `java.util.logging.*`) törlése L0-ból.
+5. A `log4j-jul` binder **marad** (harmadik féli JUL, §4.4).
+   - **Visszavonhatóság:** a `toLog4jLevel` mappolása nem változik, csak a tárolt/GUI nevek.
+
+### F2 – `signum` → `system` / `node` átnevezés (Q1) · alacsony · ✅ KÉSZ
+1. `GLOBAL_CONTEXT_NAME = "signum-global"` → `SYSTEM_CONTEXT_NAME = "system"`
+   (`NodeSystemContextSelector`).
+2. Osztályok: `SignumGlobalContext` → `NodeSystemContext`, `SignumGlobalContextSelector` →
+   `NodeSystemContextSelector` (a hivatkozók: `GlobalLoggingApplier`, `Launcher` + tesztek).
+3. Node-kontextus prefix: `signum-node-` → `node-`; no-op: `signum-node-noop` → `node-noop`
+   (`NodeLoggingContext.NAME_PREFIX`, `NodeLoggers.NOOP_CONTEXT_NAME`).
+4. `GENERATED_HEADER`: `# GENERATED by Signum` → `# GENERATED by Node`.
+5. Csak azonosítók; a `Signum` **node-főosztály** és a csomagok **nem** változnak.
+   - **Visszavonhatóság:** 100% (csak azonosító, a routing nem változik).
+
+### F3 – System logging tab (Q5) · közepes · ✅ KÉSZ
+1. `SystemLoggingProvider`/`SystemLoggingProfile`: modul-id `system`, L0-defaultok (system root
+   `level`, lib-zaj, + a §6 `console.maxLines` / `logging.buffer.*`).
+2. Regisztráció a `LoggingModule`-ban → a „system" tab **automatikusan** előjön.
+3. `ModuleLoggingProfilePanel`: system-hez **elrejtett Assignments** sub-tab (nem modul, §5.2);
+   Apply → `GlobalLoggingApplier`.
+4. System L0-referencia sablon a classpath-re.
+   - **Visszavonhatóság:** provider elvétel.
+
+   **Státusz (2026-10-31):** `SystemLoggingProfile` (L0: `level`=INFO, `console.maxLines`=1500) +
+   `SystemLoggingProvider` létrehozva, a `LoggingModule.start()` regisztrálja; a `LoggingPanel`
+   systemhez a **bare** „Logging Profiles" panelt adja (nincs „Assignments" sub-tab). Tesztelve:
+   `SystemLoggingProfileTest` + `LoggingPanelTest.systemTab_hasNoAssignmentsSubTab` (zöld).
+
+### F4 – Konzol-egységesítés + fájl-log SSOT + buffer-kulcsok (Q6) · közepes · 🟨 RÉSZBEN KÉSZ
+1. **`console.maxLines`** (system) / **`node.console.maxLines`** (node, L0 default + L1 override)
+   → **egy SSOT** a profile-ba; a GUI-konzol onnan olvassa a maxLines-t.
+2. A JSON `ConsoleSettings.maxConsoleLines` **kiszorul** (olvasó-kompat egy lépésig); a kódbeli
+   `DEFAULT_MAX_LINES` fallback marad.
+3. A `consoleLogSize` (char) és az esemény-replay-buffer a `maxLines`-ból **levezetett**.
+4. Node-fájl-log **egy SSOT-ra** (a `node.fileLog.*` a mérvadó, `Props.FILE_LOG_*` compat).
+5. `logging.buffer.system`/`replay` kulcsok (bootstrap maradjon hardcoded).
+   - **Visszavonhatóság:** a `maxLines` forrása visszaváltható (profile ↔ JSON).
+
+   **Státusz (2026-10-31):** **SSOT-definíció + resolver + system-konzol bekötés kész**:
+   `console.maxLines`=1500 (system L0) / `node.console.maxLines`=3000 (node L0) a profile-ban;
+   `ConsoleLimits` tiszta resolver (maxLines + `deriveCharCap`/`deriveReplayCapacity` levezetés,
+   `ConsoleLimitsTest` 6/6 zöld); a `SystemConsoleModule` a `console.maxLines`-t a system profile-ból
+   olvassa (L1, L0 fallback – nem hardkódolt). **Következő:** a node-konzol (`NodeConsolePanel`)
+   bekötése, a JSON `maxConsoleLines` kiszorítása, és a char-cap/replay-buffer tényleges bekötése.
+
+### F5 – `node.gui` hibrid routing (Q7) · közepes/nagy, **opcionális** (EL DÖNTVE, utolsó)
+1. A per-node nézet GUI-komponensei **az adott node `NodeLoggers`-én** logolnak (birtokolt
+   node-kontextus); a shared GUI-rendszer marad global.
+2. A routing osztály-alapú → csak azok a komponensek költöznek át, amelyek **birtokolnak** node-kontextust
+   (a §7.4 árnyalata).
+3. **Headless-safe** (nincs GUI → nincs hatása); a **system-forward megmarad** (node-kontextus →
+   `ProfileLogger.forwardToSystem` → System Console).
+   - **Csak** ha a F1–F4 stabil; a C opcionális kényelmi routing.
+
+### Nincs kódmódosítás (csak dokumentáció / magyarázat)
+- **Q2** (forrás-gát vs display-szűrő) – a §2.3 nyomatékosítja (két külön mechanizmus); L1 marad
+  forrás-gát (ha „system = teljes nyilvántartás" kellene, az külön tervezési döntés).
+
+### Nem-célok (explicit)
+- A busz-réteg (`ModuleLogger`/`ProfileLogger`) **nem** szűnik meg – a GUI/per-profil logolás
+  célállása (az analízis §8 szerint).
+- A `forwardToSystem` „minden esemény kétszer" viselkedése **nem** változik (szándékos).
+
+## 10. Döntési napló (EL DÖNTVE – a kommentek alapján)
+
+| # | Döntés | Kiválasztott |
+|---|--------|-------------|
+| D1 | `signum` elhagyása | global kontextus = **`system`**, node = **`node-<profil>`**; `Signum*` → `NodeSystemContext*`; csomag + `Signum` node-főosztály **nem** változik |
+| D2 | Generált fájl sorsa | **A (fájl marad) + teszt-takarítás** (F0); C később újragondolható |
+| D3 | Szintnevek | saját szöveg = **log4j2** (L0 + mindkét GUI-panel); `log4j-jul` binder **marad** (3rd-party JUL); `toLog4jLevel` kettős-tűrő marad |
+| D4 | System tab | **Igen** – a system **nem modul**, egyetlen kontextus; node-mintára **profile-UI** (L0/L1, nem több profil/L2) |
+| D5 | Konzol-limits | **egy SSOT** a profile-ba: `console.maxLines` / `node.console.maxLines`; a JSON `maxConsoleLines` kiszorul; char-cap + replay-buffer a `maxLines`-ból levezetett |
+| D6 | Node-fájl-log SSOT | **egy forrás** (logging-profil `node.fileLog.*`); `Props.FILE_LOG_*` compat/átíró |
+| D7 | `node.gui` routing | **C (hibrid)** – headless-safe, system-forward megmarad; osztály-alapú routing árnyalattal (§7.4) |
+
+**Implementációs sorrend:** `F0 → F1 → F2 → F3 → F4 → (F5, opcionális)`. Minden fázis build + teszttel,
+visszavonható.
+
+**Következő lépés:** **F1 / F2 / F3** ✅ KÉSZ (build + teszt), **F0** + **F4** részben. F4-ből kész
+a SSOT (`console.maxLines`/`node.console.maxLines`) + `ConsoleLimits` resolver + a system-konzol
+bekötése; marad a node-konzol, a JSON `maxConsoleLines` kiszorítása és a char-cap/replay-wiring.
+Ezután az opcionális **F5**. Ha valamelyik döntésen (D1–D7) módosítani szeretnél, szólj – a terv
+azonnal igazodzik.

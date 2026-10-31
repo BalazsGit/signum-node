@@ -42,12 +42,12 @@ public class BrowserLoggingProfile extends ModuleLoggingProfile {
         return DESCRIPTION;
     }
 
-    /** Default logger levels: the module at INFO, the engine at WARNING. */
+    /** Default logger levels: the module at INFO, the engine at WARN. */
     @Override
     public Map<String, String> getDefaults() {
         Map<String, String> defaults = new LinkedHashMap<>();
         defaults.put("application.module.browser.level", "INFO");
-        defaults.put("org.cef.level", "WARNING");
+        defaults.put("org.cef.level", "WARN");
         LOGGER.debug("BrowserLoggingProfile defaults initialized with {} entries", defaults.size());
         return Collections.unmodifiableMap(defaults);
     }

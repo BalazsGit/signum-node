@@ -18,13 +18,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 /**
- * P1.1: {@link SignumGlobalContextSelector} — every lookup (null-name and
- * caller-FQCN) must converge on the single "signum-global" context. The P0
+ * P1.1: {@link NodeSystemContextSelector} — every lookup (null-name and
+ * caller-FQCN) must converge on the single "system" context. The P0
  * spike (Q1) proved the default log4j 2.26.1 factory does NOT converge, so
  * the convergence itself is the contract under test here.
  */
-@DisplayName("P1.1 - SignumGlobalContextSelector")
-class SignumGlobalContextSelectorTest {
+@DisplayName("P1.1 - NodeSystemContextSelector")
+class NodeSystemContextSelectorTest {
 
     @TempDir
     Path tempDir;
@@ -34,17 +34,17 @@ class SignumGlobalContextSelectorTest {
     @BeforeEach
     void installFactory() {
         previousFactory = (Log4jContextFactory) LogManager.getFactory();
-        LogManager.setFactory(new Log4jContextFactory(new SignumGlobalContextSelector()));
+        LogManager.setFactory(new Log4jContextFactory(new NodeSystemContextSelector()));
     }
 
     @AfterEach
     void restoreFactory() {
         Log4jContextFactory current = (Log4jContextFactory) LogManager.getFactory();
         // P3.5: the no-arg selector now serves the JVM-lifetime shared global context
-        // (SignumGlobalContext.shared()); it must NOT be stopped here (other tests rely on
+        // (NodeSystemContext.shared()); it must NOT be stopped here (other tests rely on
         // it). Only stop standalone (URI-based) contexts created in this test.
         for (LoggerContext ctx : current.getSelector().getLoggerContexts()) {
-            if (ctx != SignumGlobalContext.shared().loggerContext()) {
+            if (ctx != NodeSystemContext.shared().loggerContext()) {
                 ctx.stop();
             }
         }
@@ -52,7 +52,7 @@ class SignumGlobalContextSelectorTest {
     }
 
     @Test
-    @DisplayName("null-name and FQCN lookups converge to the same signum-global context")
+    @DisplayName("null-name and FQCN lookups converge to the same system context")
     void bothLookupPathsConverge() {
         LoggerContext byNullName = (LoggerContext) LogManager.getContext();
         Logger byFqcn = (Logger) LogManager.getLogger("application.some.SomeClass");
@@ -60,7 +60,7 @@ class SignumGlobalContextSelectorTest {
 
         assertSame(byNullName, byFqcnContext,
                 "every lookup must converge on one context (D7)");
-        assertEquals(SignumGlobalContextSelector.GLOBAL_CONTEXT_NAME, byNullName.getName(),
+        assertEquals(NodeSystemContextSelector.SYSTEM_CONTEXT_NAME, byNullName.getName(),
                 "the global context must carry the deterministic name");
     }
 
@@ -93,7 +93,7 @@ class SignumGlobalContextSelectorTest {
         Path file = tempDir.resolve("global.log4j2.properties");
         Files.writeString(file, "status = ERROR\nrootLogger.level = TRACE\n");
 
-        LoggerContext ctx = new SignumGlobalContextSelector(file.toUri())
+        LoggerContext ctx = new NodeSystemContextSelector(file.toUri())
                 .getContext(null, null, false);
 
         assertEquals("TRACE",

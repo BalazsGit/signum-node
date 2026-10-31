@@ -61,27 +61,57 @@ All module configurations follow a standardized path schema:
 
 ```
 ./conf/
-└── node/
-    ├── profiles/                              ← Node profile configurations
-    │   ├── default.properties                 ← Runtime L1: user-editable per-key
-    │   │                                        overrides (reserved name, auto-created
-    │   │                                        at first start, never synced, not
-    │   │                                        GUI-editable)
-    │   ├── node-default.properties            ← Reference template (L0 documentation,
-    │   │                                        read-only, SHA-256 synced from resources)
-    │   ├── mainnet.properties                 ← User profile: "mainnet" (L2)
-    │   └── testnet.properties                 ← User profile: "testnet" (L2)
-    │
-    └── logging/                               ← Logging preset configurations
-        ├── default.properties                 ← Runtime L1: user-editable overrides for
-        │                                        every logging profile (reserved name,
-        │                                        auto-created, never synced)
-        ├── logging-default.properties         ← Reference template (L0 documentation,
-        │                                        read-only, SHA-256 synced from resources)
-        ├── minimal.properties
-        ├── standard.properties
-        └── verbose.properties
+├── node/
+│   ├── profiles/                              ← Node profile configurations
+│   │   ├── default.properties                 ← Runtime L1: user-editable per-key
+│   │   │                                        overrides (reserved name, auto-created
+│   │   │                                        at first start, never synced, not
+│   │   │                                        GUI-editable)
+│   │   ├── node-default.properties            ← Reference template (L0 documentation,
+│   │   │                                        read-only, SHA-256 synced from resources)
+│   │   ├── mainnet.properties                 ← User profile: "mainnet" (L2)
+│   │   └── testnet.properties                 ← User profile: "testnet" (L2)
+│   │
+│   └── logging/                               ← Logging preset configurations
+│       ├── default.properties                 ← Runtime L1: user-editable overrides for
+│       │                                        every logging profile (reserved name,
+│       │                                        auto-created, never synced)
+│       ├── logging-default.properties         ← Reference template (L0 documentation,
+│       │                                        read-only, SHA-256 synced from resources)
+│       ├── runtime/                           ← GENERATED Log4j2 node configs (NOT SSOT)
+│       │   └── {profile}.log4j2.properties
+│       ├── minimal.properties
+│       ├── standard.properties
+│       └── verbose.properties
+├── system/
+│   └── logging/                               ← System-level (JVM-global) logging
+│       ├── default.properties                 ← System L1: user-editable, global scope
+│       │                                        (reserved name, auto-created, never synced)
+│       ├── system-default.properties          ← Reference template (system L0 documentation,
+│       │                                        read-only, SHA-256 synced from resources)
+│       └── runtime/                           ← GENERATED Log4j2 global config (NOT SSOT)
+│           └── global.log4j2.properties
 ```
+
+All logging paths are RELATIVE references resolved against the application
+root via `PathUtils.resolvePath` (SSOT: `application.utils.config.LoggingPaths`),
+so a whole installation (JAR + `conf/` + `logs/` + `database/`) can be copied
+to another disk and run immediately.
+
+### Log Files (OUTSIDE the configuration tree)
+
+```
+./logs/
+├── node/{profileName}.log (+ {profileName}-%i.log.gz)   ← per-node file log
+│       (default node.fileLog.dir = logs/node, relative)
+└── system/                                                ← system-level (global) file log
+```
+
+> **Migration (one-shot, idempotent, at startup):** the legacy
+> `conf/logging-runtime/` (generated global config) is moved to
+> `conf/system/logging/runtime/`, and the legacy `conf/logs/` (log files
+> under the configuration tree) is moved to `logs/` — existing target files
+> are never clobbered. SSOT: `LoggingPaths.migrateLegacyLayout`.
 
 ---
 
@@ -211,9 +241,10 @@ is the **single level gate** for node events (the GUI bus only displays/forwards
 | 1 | Each module registers a logging provider carrying its L0 defaults | `NodeLoggingProvider`, `DatabaseLoggingProvider` → `LoggingModuleRegistry.register()` |
 | 2 | The node profile's per-node logging assignment is read (fallback: reserved `logging-default`) | `LoggingAssignmentStore` (`conf/node/profiles.json`) |
 | 3 | The effective profile's L0/L1/L2 layers are merged and resolved to Log4j2 levels | `NodeLoggingConfigResolver` (pure function) |
-| 4 | The resolved config is written to a generated `*.log4j2.properties` (not SSOT) | `NodeLoggingConfigWriter` (atomic) |
+| 4 | The resolved config is written to a generated `*.log4j2.properties` (not SSOT) | `NodeLoggingConfigWriter` (atomic) — node: `conf/node/logging/runtime/{profile}.log4j2.properties`, global: `conf/system/logging/runtime/global.log4j2.properties` (SSOT: `LoggingPaths`) |
 | 5 | The node `LoggerContext` is created / **reconfigured in place** (live Apply) | `NodeLoggingContextApplier` → `NodeLoggingContextManager` / `NodeLoggingContext` |
 | 6 | Node-context events are bridged to the GUI bus | `ProfileConsoleAppender` → `ProfileLogger` (Node Console); `SystemConsoleAppender` → `SystemLogger` (System Console) |
+| 7 | The GLOBAL (system) context is reconfigured from its generated file | `GlobalLoggingApplier` — layers: L0-global + L1 (the node L1 overlaid with the **system L1** `conf/system/logging/default.properties`, which wins for global-scope keys) |
 
 > **Node vs. other modules:** `NodeLoggingApplier.applyForNodeProfile` routes the
 > **node** module through the isolated context (step 5); other modules (e.g.
@@ -227,8 +258,25 @@ resources/conf/
 ├── node/logging/default.properties            ← L1 auto-create seed (header + comments, 0 active lines)
 ├── node/logging/logging-default.properties    ← Reference template (L0 documentation) for node module
 ├── database/logging/logging-default.properties ← Reference template for database module
-└── system/logging/logging-default.properties   ← System-level defaults
+├── system/logging/default.properties          ← System L1 auto-create seed (header + comments, 0 active lines)
+└── system/logging/system-default.properties   ← System-level (global) reference template
 ```
+
+> **Why the generated files carry more than levels:** the generated Log4j2
+> `.properties` files must fully describe the contexts — root/logger levels,
+> the console appender and (for the node) the RollingFile appender with its
+> configurable `node.fileLog.size` (rollover size, default `10MB`) and
+> `node.fileLog.max` (rolled files to keep, default `5`). That is why the
+> runtime/generated files — and the GUI's effective view — show appender
+> values (dir, size, count) next to the plain log levels.
+
+> **Portability (requirement):** every logging path is a RELATIVE reference
+> resolved against the application root (`PathUtils.resolvePath`, SSOT:
+> `LoggingPaths`); the generated files embed the relative `logs/node`
+> directory. The whole installation is disk-portable (copy + run). Log files
+> live OUTSIDE `conf/` (`logs/node/`, `logs/system/`); legacy installs are
+> migrated automatically at startup (`conf/logging-runtime` →
+> `conf/system/logging/runtime`, `conf/logs` → `logs`).
 
 ---
 

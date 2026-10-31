@@ -7,6 +7,8 @@ import application.module.node.NodeModule;
 import application.module.node.Signum;
 import application.module.node.logging.NodeLoggingProvider;
 import application.utils.config.ModuleIds;
+import application.utils.logging.NodeLoggerRegistry;
+import application.utils.logging.ProfileLogger;
 import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.GuiColors;
 import org.slf4j.Logger;
@@ -41,6 +43,15 @@ import java.util.function.Supplier;
 public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(NodeLoggingPanel.class);
+
+    /**
+     * P8/F4: routes this panel's node-profile-relevant messages to the profile's own
+     * {@link ProfileLogger} (node console + — via the P8/F1 forward — System Console)
+     * instead of the static SLF4J logger (global "system" context).
+     */
+    private ProfileLogger nodeLogger() {
+        return NodeLoggerRegistry.getOrCreate(ModuleIds.NODE, nodeProfileName);
+    }
 
     /**
      * The node profile this tab is bound to (e.g. {@code "mainnet"}), or {@code null} when the
@@ -372,8 +383,7 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
             return;
         }
         if (selectProfile(name)) {
-            LOGGER.info("Pre-selected applied logging profile '{}' in the profile menu (node profile '{}')",
-                    name, nodeProfileName);
+            nodeLogger().info("Pre-selected applied logging profile '" + name + "' in the profile menu (node profile '" + nodeProfileName + "')");
         }
     }
 

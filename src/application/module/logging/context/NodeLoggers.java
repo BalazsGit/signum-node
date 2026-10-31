@@ -102,7 +102,7 @@ public final class NodeLoggers {
         return NoopHolder.LOGGER;
     }
 
-    private static final String NOOP_CONTEXT_NAME = "signum-node-noop";
+    private static final String NOOP_CONTEXT_NAME = "node-noop";
 
     private static final String NOOP_RESOURCE = "application/module/logging/context/noop.log4j2.properties";
 

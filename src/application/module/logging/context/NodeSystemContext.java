@@ -9,7 +9,7 @@ import org.apache.logging.log4j.core.config.properties.PropertiesConfigurationFa
 import java.net.URI;
 
 /**
- * The single JVM-wide GLOBAL Log4j2 context ({@code signum-global},
+ * The single JVM-wide GLOBAL Log4j2 context ({@code system},
  * per-node isolated LoggerContext plan §6.2).
  * <p>
  * Created exactly once (early, on first {@link #shared()}); unlike the node
@@ -22,22 +22,23 @@ import java.net.URI;
  * Two-phase configuration (mirrors the node two-phase start, §6.3): it boots
  * WITHOUT a config file (log4j default configuration) and is reconfigured
  * from the generated global file
- * ({@code conf/logging-runtime/global.log4j2.properties}, §6.4) on the first
+ * ({@code conf/system/logging/runtime/global.log4j2.properties}, §6.4;
+ * SSOT: {@code application.utils.config.LoggingPaths}) on the first
  * global Apply. Until the P3.5 binding swap the global context is a
  * <b>dormant</b> destination (SLF4J/JUL still route to the legacy chain) —
  * managing it now keeps the Apply pipeline complete and testable.
  * </p>
  * <p>Headless-safe (no Swing, no logging — the caller reports errors).</p>
  */
-public final class SignumGlobalContext {
+public final class NodeSystemContext {
 
     private final LoggerContext context;
     private final URI[] configUri = { null };
 
-    private SignumGlobalContext(final URI configUri) {
+    private NodeSystemContext(final URI configUri) {
         this.context = configUri == null
-                ? new LoggerContext(SignumGlobalContextSelector.GLOBAL_CONTEXT_NAME)
-                : new LoggerContext(SignumGlobalContextSelector.GLOBAL_CONTEXT_NAME, null, configUri);
+                ? new LoggerContext(NodeSystemContextSelector.SYSTEM_CONTEXT_NAME)
+                : new LoggerContext(NodeSystemContextSelector.SYSTEM_CONTEXT_NAME, null, configUri);
         // the LoggerContext constructor does NOT start the context (P0 Q2a)
         this.context.start();
         // P3.5: the default (no-file) configuration runs at root ERROR. Raise it to the
@@ -52,14 +53,14 @@ public final class SignumGlobalContext {
      * The ONE shared global context (early-initialized). Reconfigure calls on
      * it are serialized by the LoggerContext's internal config lock (A.1/3).
      */
-    public static SignumGlobalContext shared() {
+    public static NodeSystemContext shared() {
         return SHARED;
     }
 
-    private static final SignumGlobalContext SHARED = new SignumGlobalContext(null);
+    private static final NodeSystemContext SHARED = new NodeSystemContext(null);
 
     /** Reconfigures from the current config file (the in-place Apply path). */
-    public SignumGlobalContext reconfigure() {
+    public NodeSystemContext reconfigure() {
         context.reconfigure();
         return this;
     }
@@ -71,7 +72,7 @@ public final class SignumGlobalContext {
      *
      * @return this instance
      */
-    public SignumGlobalContext reconfigureFrom(final URI newConfigUri) {
+    public NodeSystemContext reconfigureFrom(final URI newConfigUri) {
         if (newConfigUri == null) {
             throw new IllegalArgumentException("newConfigUri must not be null");
         }

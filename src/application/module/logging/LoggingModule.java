@@ -37,6 +37,7 @@ public class LoggingModule implements Module {
 
     private ModuleContext context;
     private LoggingPanel loggingPanel;
+    private SystemLoggingProvider systemProvider;
 
     @Override
     public String getId() {
@@ -59,13 +60,22 @@ public class LoggingModule implements Module {
 
     @Override
     public void start() {
-        LOGGER.info("Logging Module started.");
+        // The System (JVM-global) logging tab is registered by the Logging module
+        // itself (the system context is not a "module" provider like Node/Database);
+        // it appears as a first-class tab alongside them (decision D5).
+        this.systemProvider = new SystemLoggingProvider();
+        systemProvider.register();
+        LOGGER.info("Logging Module started (System logging tab registered).");
     }
 
     @Override
     public void stop() {
         // Remove the LoggingPanel's registry listeners and unsubscribe the
         // Assignments panels' profile-change push listeners.
+        if (systemProvider != null) {
+            systemProvider.unregister();
+            systemProvider = null;
+        }
         if (loggingPanel != null) {
             loggingPanel.dispose();
         }

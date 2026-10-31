@@ -356,7 +356,7 @@ class ModuleLoggingProfilePanelTest {
         assertTrue(before.stream().anyMatch(l -> l != null && l.startsWith("test.level") && l.contains("(=INFO)")),
                 "a freshly loaded row already shows its initial value in parentheses; labels=" + before);
 
-        onEdt(() -> level.setSelectedItem("FINE"));
+        onEdt(() -> level.setSelectedItem("DEBUG"));
         List<String> changed = allLabels(panel);
         assertTrue(changed.stream().anyMatch(l -> l != null && l.startsWith("test.level")
                         && l.contains("(=INFO)") && l.endsWith(" *")),
@@ -377,7 +377,7 @@ class ModuleLoggingProfilePanelTest {
                 "a log-level key must use a combo editor");
         assertFalse(levelEditor.isEditable(),
                 "the log-level editor is a classic (non-editable) dropdown over the predefined level list");
-        assertEquals(9, levelEditor.getItemCount(), "the level dropdown offers the fixed LOG_LEVELS list");
+        assertEquals(6, levelEditor.getItemCount(), "the level dropdown offers the fixed LOG_LEVELS list");
         assertEquals("INFO", String.valueOf(levelEditor.getSelectedItem()),
                 "the template row's default level (INFO) is selected");
         JComboBox<?> handlerEditor = assertInstanceOf(JComboBox.class, editorAfterLabel(panel, "test.handler"),
@@ -1198,15 +1198,15 @@ class ModuleLoggingProfilePanelTest {
         onEdt(() -> {
             levelBox.setSelected(true);
             keyInput.setText(levelKey);
-            findAddKeyLevelCombo(panel).setSelectedItem("FINE");
+            findAddKeyLevelCombo(panel).setSelectedItem("DEBUG");
             findButtonByTooltip(panel, "Add key").doClick();
         });
         JComboBox<?> levelCombo = assertInstanceOf(JComboBox.class, editorAfterLabel(panel, levelKey),
                 "the level-mode key added its row (the non-editable level combo)");
         assertFalse(levelCombo.isEditable(),
                 "a log-level-mode key's editor is the NON-editable level combo (the level rows' dropdown)");
-        assertEquals("FINE", levelCombo.getSelectedItem(), "the selected initial level is the row's value");
-        assertEquals("FINE", panel.editorValueOf(levelKey));
+        assertEquals("DEBUG", levelCombo.getSelectedItem(), "the selected initial level is the row's value");
+        assertEquals("DEBUG", panel.editorValueOf(levelKey));
     }
 
     /** The add-key row's value-type checkbox. */
@@ -1330,11 +1330,11 @@ class ModuleLoggingProfilePanelTest {
         assertFalse(searches.isEmpty(), "the search box is present after enableSearch");
 
         // The level rows are CLASSIC (non-editable) combos; "warn" occurs only
-        // in the selected value ("WARNING") of the common-logger template rows.
+        // in the selected value ("WARN") of the common-logger template rows.
         JComponent hikariEditor = editorAfterLabel(panel, "com.zaxxer.hikari.level");
         JComboBox<?> hikariCombo = assertInstanceOf(JComboBox.class, hikariEditor, "the hikari row is a combo");
         assertFalse(hikariCombo.isEditable(), "the level rows are classic (non-editable) combos");
-        assertEquals("WARNING", String.valueOf(hikariCombo.getSelectedItem()),
+        assertEquals("WARN", String.valueOf(hikariCombo.getSelectedItem()),
                 "the template row's default level is WARNING");
 
         // A non-editable combo has no text component a document highlight
@@ -1352,7 +1352,7 @@ class ModuleLoggingProfilePanelTest {
                             "the search swaps the non-editable combo's renderer for the band-painting one");
             // Resolve the band in the selected value's cell: "WARN"ing.
             java.awt.Component cell = bandRenderer.getListCellRendererComponent(
-                    new JList<>(new String[]{"WARNING"}), "WARNING", 0, false, false);
+                    new JList<>(new String[]{"WARN"}), "WARN", 0, false, false);
             bandedRef[0] = cell instanceof SearchMatchLabel label && label.hasHighlight();
         });
         assertTrue(bandedRef[0], "the matched occurrence in the selected value carries the search band");
@@ -1973,7 +1973,7 @@ class ModuleLoggingProfilePanelTest {
                     "Save is not valid while there are no unsaved changes");
             // An unsaved change lights Save up (it is valid for an on-disk profile now).
             JComboBox<?> level = assertInstanceOf(JComboBox.class, editorAfterLabel(panel, "test.level"));
-            onEdt(() -> level.setSelectedItem("FINE"));
+            onEdt(() -> level.setSelectedItem("DEBUG"));
             assertTrue(findButtonByTooltip(panel, "Save<br>").isEnabled(),
                     "Save is valid while the profile has unsaved changes");
             assertTrue(findButtonByTooltip(panel, "Rename Profile<br>").isEnabled(),
@@ -2011,7 +2011,7 @@ class ModuleLoggingProfilePanelTest {
 
             // An unsaved change is discarded by the reload.
             JComboBox<?> level = assertInstanceOf(JComboBox.class, editorAfterLabel(panel, "test.level"));
-            onEdt(() -> level.setSelectedItem("FINE"));
+            onEdt(() -> level.setSelectedItem("DEBUG"));
 
             final boolean[] ok = {false};
             onEdt(() -> ok[0] = panel.selectProfile(name));
@@ -2105,7 +2105,7 @@ class ModuleLoggingProfilePanelTest {
             onEdt(findButtonByTooltip(panel, "Save<br>")::doClick);
             // Profile 'b' on disk defines ONLY test.level (no test.handler at all).
             Properties partial = new Properties();
-            partial.setProperty("test.level", "FINE");
+            partial.setProperty("test.level", "DEBUG");
             try {
                 new LoggingProfileRepository().saveProps("test-mod", b, partial);
             } catch (Exception e) {
@@ -2117,7 +2117,7 @@ class ModuleLoggingProfilePanelTest {
             assertEquals("java.util.logging.ConsoleHandler",
                     rowEditorText(panel, "test.handler").getText(),
                     "a key missing from the profile loads the application default, not the previous profile's value");
-            assertEquals("FINE",
+            assertEquals("DEBUG",
                     ((JComboBox<?>) editorAfterLabel(panel, "test.level")).getSelectedItem(),
                     "a key present in the profile loads its value");
             // Switch back: 'a's saved value comes back.
@@ -2221,7 +2221,7 @@ class ModuleLoggingProfilePanelTest {
         String name = "applied-without-snapshot-" + System.nanoTime();
         Properties values = new Properties();
         values.setProperty("test.handler", "custom.handler");
-        values.setProperty("test.level", "WARNING");
+        values.setProperty("test.level", "WARN");
         try {
             repo.create("test-mod", name, values);
             repo.setApplied("test-mod", name);
@@ -2447,7 +2447,7 @@ class ModuleLoggingProfilePanelTest {
 
             // Change a value: the row is starred in place and its tooltip says so.
             JComboBox<?> level = assertInstanceOf(JComboBox.class, editorAfterLabel(panel, "test.level"));
-            onEdt(() -> level.setSelectedItem("FINE"));
+            onEdt(() -> level.setSelectedItem("DEBUG"));
             List<String> labels = allLabels(panel);
             assertTrue(labels.stream().anyMatch(l -> l != null && l.startsWith("test.level") && l.endsWith("*")),
                     "the changed row carries the trailing star; labels=" + labels);
@@ -2525,7 +2525,7 @@ class ModuleLoggingProfilePanelTest {
         ModuleLoggingProfilePanel panel = newPanel();
         // The Default entry is selected on construction; any change is unsaved.
         JComboBox<?> level = assertInstanceOf(JComboBox.class, editorAfterLabel(panel, "test.level"));
-        onEdt(() -> level.setSelectedItem("FINE"));
+        onEdt(() -> level.setSelectedItem("DEBUG"));
         List<String> labels = allLabels(panel);
         assertTrue(labels.stream().anyMatch(l -> l != null && l.startsWith("test.level") && l.endsWith("*")),
                 "the changed row carries the trailing star; labels=" + labels);

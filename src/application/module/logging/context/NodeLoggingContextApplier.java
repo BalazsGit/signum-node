@@ -119,7 +119,10 @@ public final class NodeLoggingContextApplier {
 
     private static NodeLoggingContext doApply(Path confRoot, NodeLoggingContextManager manager,
                                               String profileName, boolean minimal) throws IOException {
-        final Path root = confRoot.toAbsolutePath();
+        // Portable resolution: a relative conf root is resolved against the
+        // application root (PathUtils SSOT), an absolute one (tests) passes
+        // through unchanged.
+        final Path root = application.utils.io.PathUtils.resolvePath(confRoot.toString());
         final Properties l2 = new Properties();
         if (minimal) {
             // never open a log file in the constructor phase (plan §6.3)
@@ -170,10 +173,29 @@ public final class NodeLoggingContextApplier {
      * @return the loaded layers (never null; missing files pass as empty)
      */
     public static NodeLoggingConfigResolver.Layers loadLayers(Path confRoot, String profileName) {
+        final Path root = application.utils.io.PathUtils.resolvePath(confRoot.toString());
         final Properties l2 = new Properties();
-        loadL2(confRoot.toAbsolutePath(), profileName, l2);
+        loadL2(root, profileName, l2);
         return new NodeLoggingConfigResolver.Layers(
-                loadL0Node(), loadL0Global(), loadL1(confRoot.toAbsolutePath()), l2);
+                loadL0Node(), loadL0Global(), loadL1(root), l2);
+    }
+
+    /**
+     * The layers for the GLOBAL context resolution (used by the global Apply
+     * pipeline). Identical to {@link #loadLayers(Path, String)} with a blank
+     * profile, EXCEPT the L1 layer is the node L1 ({@code
+     * {confRoot}/node/logging/default.properties}) overlaid with the
+     * SYSTEM L1 ({@code {confRoot}/system/logging/default.properties}) —
+     * the system L1 is the system-level (JVM-global) user layer and has
+     * priority over the node L1's global-scope keys (the node L1 keeps its
+     * legacy role for backward compatibility).
+     */
+    public static NodeLoggingConfigResolver.Layers loadGlobalLayers(Path confRoot) {
+        final Path root = application.utils.io.PathUtils.resolvePath(confRoot.toString());
+        final Properties l1 = new Properties();
+        l1.putAll(loadL1(root));
+        l1.putAll(loadL1System(root)); // system L1 wins over the node L1 (global scope)
+        return new NodeLoggingConfigResolver.Layers(loadL0Node(), loadL0Global(), l1, new Properties());
     }
 
     /** L0-node: the node module's built-in defaults (empty until the provider registers). */
@@ -205,6 +227,16 @@ public final class NodeLoggingContextApplier {
     }
 
     /**
+     * L1-system: the system-level (JVM-global) user-editable layer
+     * ({@code {confRoot}/system/logging/default.properties}, SSOT:
+     * {@link application.utils.config.LoggingPaths#systemL1File(String)}).
+     */
+    static Properties loadL1System(Path confRoot) {
+        return readPropertiesQuietly(application.utils.config.LoggingPaths
+                .systemL1File(confRoot.toString()));
+    }
+
+    /**
      * L2: the node profile's assigned logging profile for the node module
      * (null/blank profile — global-only resolution — or a missing/blank
      * assignment → empty layer; the reserved fallback is the assignment
@@ -227,11 +259,18 @@ public final class NodeLoggingContextApplier {
     }
 
     /**
-     * The default node log file directory ({@code {confRoot}/logs/node}),
-     * absolute, as the resolver expects.
+     * The default node log file directory: the portable, RELATIVE
+     * {@code logs/node} (SSOT: {@link application.utils.config.LoggingPaths#NODE_LOG_DIR_RELATIVE})
+     * — OUTSIDE the configuration tree, resolved against the application
+     * root at read time (the launcher keeps the JVM working directory equal
+     * to the application root), so a copied installation keeps working.
+     * <p>
+     * The {@code confRoot} parameter is kept for API compatibility; the
+     * default no longer depends on it (the node file log has never belonged
+     * under {@code conf/}).
      */
     public static String defaultFileLogDir(Path confRoot) {
-        return confRoot.toAbsolutePath().resolve("logs").resolve("node").toString();
+        return application.utils.config.LoggingPaths.NODE_LOG_DIR_RELATIVE;
     }
 
     private static Properties readPropertiesQuietly(Path file) {

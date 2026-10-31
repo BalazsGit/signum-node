@@ -116,9 +116,12 @@ public final class NodeLoggerRegistry {
      * Signum exists is lost.
      * </p>
      * <p>
-     * The created logger has forwarding to {@link SystemLogger} disabled: the
-     * {@link SystemLoggerJulHandler} already dispatches every event to the System
-     * Console, so a second forward from the ProfileLogger would duplicate lines.
+     * The created logger has forwarding to {@link SystemLogger} ENABLED (P8/F1): the
+     * legacy {@link SystemLoggerJulHandler} is no longer installed (P3.5), so the
+     * ProfileLogger's forward is the ONLY path from a node's isolated LoggerContext to
+     * the System Console. Node-engine events live solely in the node's isolated context
+     * (bound via NodeLoggers), so forwarding them produces exactly one System-Console
+     * copy — no duplication.
      * </p>
      *
      * @param moduleId    the module identifier (e.g. "node"), never null
@@ -136,7 +139,7 @@ public final class NodeLoggerRegistry {
             return existing;
         }
         ProfileLogger created = new ProfileLogger(moduleId, profileName);
-        created.setForwardToSystem(false);
+        created.setForwardToSystem(true);
         ProfileLogger previous = REGISTRY.putIfAbsent(scope, created);
         return previous != null ? previous : created;
     }

@@ -33,6 +33,13 @@ public final class ReservedNames {
     public static final String LEGACY_DEFAULT_LOGGING_NAME = "logging-default";
 
     /**
+     * Reserved name: the system-level (JVM-global) logging L0 documentation
+     * template file name ({@code conf/system/logging/system-default.properties},
+     * SHA-256 synced from classpath resources, never read at runtime).
+     */
+    public static final String SYSTEM_DEFAULT_LOGGING_NAME = "system-default";
+
+    /**
      * Names excluded from NODE profile discovery ({@code conf/{module}/profiles/}):
      * the canonical L1 name + the legacy template names (a
      * {@code logging-default.properties} may exist in the profiles directory of
@@ -43,7 +50,7 @@ public final class ReservedNames {
 
     /** Names excluded from LOGGING profile discovery ({@code conf/{module}/logging/}). */
     public static final Set<String> LOGGING_RESERVED_NAMES =
-            Set.of(DEFAULT_PROFILE_NAME, LEGACY_DEFAULT_LOGGING_NAME);
+            Set.of(DEFAULT_PROFILE_NAME, LEGACY_DEFAULT_LOGGING_NAME, SYSTEM_DEFAULT_LOGGING_NAME);
 
     private ReservedNames() {
         // static utility

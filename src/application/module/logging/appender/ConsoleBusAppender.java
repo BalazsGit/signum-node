@@ -8,11 +8,6 @@ import org.apache.logging.log4j.core.appender.AbstractAppender;
 import org.apache.logging.log4j.core.config.Configuration;
 import org.apache.logging.log4j.core.config.LoggerConfig;
 
-import java.io.PrintWriter;
-import java.io.StringWriter;
-import java.time.Instant;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.Objects;
 
 /**
@@ -33,16 +28,12 @@ import java.util.Objects;
  * <p>
  * The appender does NO level filtering: the context's configuration is the
  * single level gate (the event only arrives when the context emitted it).
- * Formatting is BriefLogFormatter-style:
- * {@code [LEVEL] yyyy-MM-dd HH:mm:ss [thread] loggerName - message} plus the
- * stack trace when the message carries one.
+ * It relays the event as a STRUCTURED bus {@code LogEvent} (original logger
+ * name / thread / timestamp / raw message / throwable) — it does NOT pre-format:
+ * the console/file formatter is the single renderer (P8/F2).
  * </p>
  */
 public abstract class ConsoleBusAppender extends AbstractAppender {
-
-    /** BriefLogFormatter-compatible timestamp (second precision, local zone). */
-    private static final DateTimeFormatter TIMESTAMP = DateTimeFormatter
-            .ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.systemDefault());
 
     /** The bus this context's events are forwarded to (never null). */
     protected final ModuleLogger target;
@@ -105,7 +96,9 @@ public abstract class ConsoleBusAppender extends AbstractAppender {
         // only reached here because the context emitted it at the profile's
         // configured level, so relay it via forward() — NOT log() — to avoid a
         // second, non-native minLevel re-filter (plan §7.3/P5.1).
-        target.forward(toBusLevel(event.getLevel()), format(event));
+        // P8/F2: relay a STRUCTURED bus event (original fields, no pre-rendering) so the
+        // console formatter is the single renderer (no double level/timestamp).
+        target.forward(toBusEvent(event));
     }
 
     @Override
@@ -150,23 +143,28 @@ public abstract class ConsoleBusAppender extends AbstractAppender {
         }
     }
 
-    private static String format(final LogEvent event) {
-        final StringBuilder sb = new StringBuilder(128);
-        sb.append('[').append(event.getLevel().name()).append("] ")
-                .append(TIMESTAMP.format(Instant.ofEpochMilli(event.getTimeMillis()))).append(" [")
-                .append(event.getThreadName()).append("] ")
-                .append(event.getLoggerName()).append(" - ")
-                .append(event.getMessage().getFormattedMessage());
+    /**
+     * Builds the structured bus {@link application.utils.logging.event.LogEvent} from the
+     * ORIGINAL Log4j2 fields (P8/F2): raw message, original logger name / thread /
+     * timestamp / throwable. The console formatter ({@code TerminalFormatLogFormatter}) is
+     * the single renderer — no pre-formatting here (that produced the double level/timestamp).
+     */
+    static application.utils.logging.event.LogEvent toBusEvent(final LogEvent event) {
         // 2.26.1: the trailing-throwable varargs call (error("x", t)) lands on the
         // EVENT (LogEvent.getThrown); a ThrowableMessage carries it on the MESSAGE
         final Throwable thrown = event.getThrown() != null
                 ? event.getThrown()
                 : event.getMessage().getThrowable();
+        final application.utils.logging.event.LogEvent.Builder b =
+                new application.utils.logging.event.LogEvent.Builder()
+                        .timestamp(event.getTimeMillis())
+                        .level(toBusLevel(event.getLevel()))
+                        .loggerName(event.getLoggerName())
+                        .message(event.getMessage().getFormattedMessage())
+                        .threadName(event.getThreadName());
         if (thrown != null) {
-            final StringWriter sw = new StringWriter();
-            thrown.printStackTrace(new PrintWriter(sw));
-            sb.append('\n').append(sw);
+            b.throwable(thrown);
         }
-        return sb.toString();
+        return b.build();
     }
 }

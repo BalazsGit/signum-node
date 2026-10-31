@@ -38,6 +38,16 @@ public final class ModuleIds {
     public static final String BROWSER = "browser";
 
     /**
+     * System module identifier (conf path segment: {@code conf/system/}).
+     * Owns the system-level (JVM-global) logging configuration layer:
+     * {@code conf/system/logging/} (L1 {@code default.properties}, the
+     * {@code system-default.properties} reference template and the
+     * generated {@code runtime/global.log4j2.properties} — see
+     * {@code application.utils.config.LoggingPaths}).
+     */
+    public static final String SYSTEM = "system";
+
+    /**
      * Module profile category (path segment: {@code {conf}/{module}/profiles/}).
      * Kept in sync with {@link PropertiesProfileLoader#DEFAULT_CATEGORY_PROFILES}.
      */
@@ -48,4 +58,12 @@ public final class ModuleIds {
      * Kept in sync with {@link PropertiesProfileLoader#DEFAULT_CATEGORY_LOGGING}.
      */
     public static final String CATEGORY_LOGGING = "logging";
+
+    /**
+     * Generated Log4j2 runtime-config category (path segment:
+     * {@code {conf}/{module}/logging/runtime/}). Holds the GENERATED
+     * {@code *.log4j2.properties} files (not the source of truth — see
+     * {@code application.utils.config.LoggingPaths}).
+     */
+    public static final String CATEGORY_LOGGING_RUNTIME = "runtime";
 }

@@ -249,7 +249,7 @@ public final class SmartScrollController {
         // Periodic summary log - no per-call allocation, only every N calls
         if (totalCalls % SUMMARY_INTERVAL == 0) {
             double efficiency = totalCalls > 0 ? (100.0 * actualScrolls / totalCalls) : 100.0;
-            LOGGER.info("[ScrollDebug] SmartScrollController summary: totalCalls={}, actualScrolls={}, " +
+            LOGGER.debug("[ScrollDebug] SmartScrollController summary: totalCalls={}, actualScrolls={}, " +
                     "skipped={}, transitions={}, efficiency={}% ",
                     totalCalls, actualScrolls, skippedScrolls, stateTransitions, 
                     String.format("%.1f", efficiency));

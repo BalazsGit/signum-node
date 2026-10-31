@@ -155,6 +155,22 @@ public interface ModuleLogger {
      */
     void forward(LogLevel level, String message, Throwable cause);
 
+    /**
+     * Relays a fully structured {@link LogEvent} WITHOUT applying this logger's own
+     * {@code minLevel} gate (contrast with {@link #log}) — see {@link #forward(LogLevel, String)}.
+     * <p>
+     * P8/F2 entry point of the node-context &rarr; bus bridge: the bridge
+     * ({@code ConsoleBusAppender}) builds the event from the ORIGINAL Log4j2 fields (raw
+     * message, original logger name / thread / timestamp / throwable) so the console
+     * formatter is the single renderer (no double level/timestamp). Replay, subscriber
+     * fan-out and (for a {@link ProfileLogger}) the forward-to-system step are preserved;
+     * only the minLevel check is bypassed.
+     * </p>
+     *
+     * @param event the structured event to relay (never null)
+     */
+    void forward(LogEvent event);
+
     // ── Subscriber Management ───────────────────────────────────────────
 
     /**

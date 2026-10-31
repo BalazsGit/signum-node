@@ -32,6 +32,8 @@ class ReservedNamesTest {
     void loggingReservedNames_CoverCanonicalAndLegacyNames() {
         assertTrue(ReservedNames.LOGGING_RESERVED_NAMES.contains("default"));
         assertTrue(ReservedNames.LOGGING_RESERVED_NAMES.contains("logging-default"));
+        assertTrue(ReservedNames.LOGGING_RESERVED_NAMES.contains("system-default"),
+                "the system L0 template name must be reserved (excluded from discovery)");
         assertFalse(ReservedNames.LOGGING_RESERVED_NAMES.contains("node-default"));
         assertTrue(ReservedNames.isLoggingReservedName("default"));
         assertFalse(ReservedNames.isLoggingReservedName("verbose"));

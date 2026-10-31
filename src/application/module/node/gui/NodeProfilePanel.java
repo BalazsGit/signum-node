@@ -15,6 +15,8 @@ import application.utils.gui.GuiColors;
 import application.utils.gui.GuiFontManager;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.ResponsiveToolbarScrollPane;
+import application.utils.logging.NodeLoggerRegistry;
+import application.utils.logging.ProfileLogger;
 
 import java.awt.BorderLayout;
 import java.awt.Desktop;
@@ -51,6 +53,17 @@ import org.slf4j.LoggerFactory;
 @SuppressWarnings("serial")
 public class NodeProfilePanel extends JPanel {
     private static final Logger LOGGER = LoggerFactory.getLogger(NodeProfilePanel.class);
+
+    /**
+     * P8/F4: this panel's node-relevant lifecycle messages route to the profile's own
+     * {@link ProfileLogger} (the node console sees them, and — via the P8/F1 forward —
+     * the System Console too) instead of the static SLF4J logger (global "system" context).
+     * The registry is the same instance {@code Signum} adopts at startup, so early
+     * (pre-start) GUI messages are not lost.
+     */
+    private ProfileLogger nodeLogger() {
+        return NodeLoggerRegistry.getOrCreate(ModuleIds.NODE, profile.getName());
+    }
 
     private final JFrame parentFrame;
     private final NodeProfile profile;
@@ -334,7 +347,7 @@ public class NodeProfilePanel extends JPanel {
         newSignum.setGuiPanel(this);
         // Initial refresh so the UI immediately reflects the current node state.
         SwingUtilities.invokeLater(() -> refreshFromSignum(null, newSignum.getState()));
-        LOGGER.info("Adopted Signum for profile: {} (state={})", profile.getName(), newSignum.getState());
+        nodeLogger().info("Adopted Signum for profile: " + profile.getName() + " (state=" + newSignum.getState() + ")");
     }
 
     /**
@@ -369,8 +382,7 @@ public class NodeProfilePanel extends JPanel {
             return;
         }
         if (registered != null && registered != signum) {
-            LOGGER.info("[{}] Late-bound the Signum from the NodeModule registry (start was not initiated by this panel)",
-                    profile.getName());
+            nodeLogger().info("[" + profile.getName() + "] Late-bound the Signum from the NodeModule registry (start was not initiated by this panel)");
             adoptSignum(registered);
         }
     }
@@ -458,7 +470,7 @@ public class NodeProfilePanel extends JPanel {
             toolbar.setMaintenanceRefresher(null);
             toolbar.stopSpinnerAnimation();
         }
-        LOGGER.info("NodeProfilePanel disposed for profile: {}", profile.getName());
+        nodeLogger().info("NodeProfilePanel disposed for profile: " + profile.getName());
 
         // Unregister the info bar from the cross-profile conflict broadcast so a disposed
         // panel is no longer refreshed by NodeInfoBar.refreshAllConflicts() (avoids a leak).
@@ -739,7 +751,7 @@ public class NodeProfilePanel extends JPanel {
         // Run within the profile's log context so the request logs (this panel +
         // NodeConsolePanel.restart + NodeModule.restartNode, all on the EDT) route
         // to the per-profile logger (<node.<profile>>) instead of the <system> context.
-        LOGGER.info("Restart requested for profile: {}", profile.getName());
+        nodeLogger().info("Restart requested for profile: " + profile.getName());
         if (consolePanel != null) {
             consolePanel.restartNode();
         }
@@ -815,7 +827,7 @@ public class NodeProfilePanel extends JPanel {
         // NodeModule.stopNode on the EDT) route to the per-profile logger
         // (<node.<profile>>) instead of the <system> context.
         NodeModule.getInstance().stopNode(profile.getName());
-        LOGGER.info("Stop requested for profile: {}", profile.getName());
+        nodeLogger().info("Stop requested for profile: " + profile.getName());
     }
 
     public void startNode() {
@@ -838,9 +850,9 @@ public class NodeProfilePanel extends JPanel {
             }
             started = holder[0];
         } catch (Exception e) {
-            LOGGER.error("Start failed for profile: {}", profile.getName(), e);
+            nodeLogger().error("Start failed for profile: " + profile.getName(), e);
         }
-        LOGGER.info("Start requested for profile: {}", profile.getName());
+        nodeLogger().info("Start requested for profile: " + profile.getName());
         onNodeStarted(started);
     }
 
@@ -912,7 +924,7 @@ public class NodeProfilePanel extends JPanel {
      */
     public void refreshFromSignum(Signum.State oldState, Signum.State newState) {
         String profileName = profile.getName();
-        LOGGER.info("[{}] State change: {} -> {}", profileName, oldState, newState);
+        nodeLogger().info("[" + profileName + "] State change: " + oldState + " -> " + newState);
 
         // Single visual refresh point (info bar + toolbar + tab icon), shared with the
         // operating-state path so the tab header always matches the panel.

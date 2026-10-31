@@ -4,7 +4,7 @@ import application.module.logging.appender.SystemConsoleAppender;
 import application.module.logging.context.NodeLoggingConfigResolver;
 import application.module.logging.context.NodeLoggingConfigWriter;
 import application.module.logging.context.NodeLoggingContextApplier;
-import application.module.logging.context.SignumGlobalContext;
+import application.module.logging.context.NodeSystemContext;
 import application.module.node.NodeModule;
 import application.module.node.Signum;
 import application.utils.config.PropertiesProfileLoader;
@@ -27,7 +27,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * <ol>
  *   <li>resolves the layers (the node profile's L0/L1/L2 chain — the global
  *       values are the layers' global portions), writes the generated GLOBAL
- *       file and reconfigures the shared {@link SignumGlobalContext}
+ *       file and reconfigures the shared {@link NodeSystemContext}
  *       (dormant destination until the P3.5 binding swap, but managed from
  *       now so the pipeline is complete);</li>
  *   <li><b>re-applies every RUNNING node</b>: the node generated files embed
@@ -99,15 +99,18 @@ public final class GlobalLoggingApplier {
     private static boolean doApplyGlobal(String confRoot) {
         boolean globalApplied = false;
         try {
-            Path root = Path.of(confRoot).toAbsolutePath();
-            // Resolve from the node module's layers (the global portions are
-            // L0-global + the global class overrides; the node profile's own
-            // L2 only affects its own node file, not the global one).
+            // Portable resolution: the conf root is a RELATIVE reference
+            // resolved against the application root (LoggingPaths/PathUtils
+            // SSOT — never against a stray working directory).
+            Path root = application.utils.io.PathUtils.resolvePath(confRoot);
+            // Resolve from the GLOBAL layer set (L0-global + the L1 layers —
+            // the node L1 overlaid with the system L1 — and the global class
+            // overrides; no profile L2: it only affects its own node file).
             NodeLoggingConfigResolver.Resolved resolved = NodeLoggingConfigResolver.resolve(
-                    NodeLoggingContextApplier.loadLayers(root, null),
+                    NodeLoggingContextApplier.loadGlobalLayers(root),
                     NodeLoggingContextApplier.defaultFileLogDir(root));
             final Path globalFile = NodeLoggingConfigWriter.writeGlobal(root, resolved);
-            SignumGlobalContext global = SignumGlobalContext.shared();
+            NodeSystemContext global = NodeSystemContext.shared();
             if (global.configUri() == null || !global.configUri().equals(globalFile.toUri())) {
                 global.reconfigureFrom(globalFile.toUri());
             } else {
@@ -150,7 +153,7 @@ public final class GlobalLoggingApplier {
      * node's ProfileConsoleAppender re-attach. Idempotent (name-based dedup on the root → no
      * double delivery).
      */
-    private static void attachGlobalConsole(SignumGlobalContext global) {
+    private static void attachGlobalConsole(NodeSystemContext global) {
         try {
             LoggerConfig root = global.loggerContext().getConfiguration().getRootLogger();
             // GUI System Console bridge (programmatic; NOT in the generated file).

@@ -4,6 +4,9 @@ import application.module.appearance.AppearanceModule;
 import application.module.node.BlockchainProcessor;
 import application.module.node.Signum;
 import application.module.node.profile.NodeProfile;
+import application.utils.config.ModuleIds;
+import application.utils.logging.NodeLoggerRegistry;
+import application.utils.logging.ProfileLogger;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import application.module.node.util.Listener;
@@ -14,6 +17,7 @@ import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiFontManager;
 import application.utils.gui.GuiIcons;
 import application.utils.gui.HoverScaleIcon;
+import application.utils.gui.IconFontCache;
 import application.utils.gui.SpinnerIcon;
 
 import com.formdev.flatlaf.extras.FlatSVGIcon;
@@ -60,6 +64,15 @@ import application.module.node.NodeModule;
 public class NodeToolbar extends JPanel {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(NodeToolbar.class);
+
+    /**
+     * P8/F4: routes node-relevant toolbar messages to the profile's own
+     * {@link ProfileLogger} (node console + — via the P8/F1 forward — System Console)
+     * instead of the static SLF4J logger (global "system" context).
+     */
+    private ProfileLogger nodeLogger() {
+        return NodeLoggerRegistry.getOrCreate(ModuleIds.NODE, profile.getName());
+    }
     private static final int ANIMATION_DURATION_MS = 250;
 
     private final NodeProfile profile;
@@ -295,8 +308,8 @@ public class NodeToolbar extends JPanel {
      */
     private static void setIconButton(JButton button, FontAwesome iconCode, Color color, float iconSize) {
         HoverScaleIcon.install(button,
-                IconFontSwing.buildIcon(iconCode, iconSize, color),
-                IconFontSwing.buildIcon(iconCode, iconSize * HoverScaleIcon.DEFAULT_SCALE, color));
+                IconFontCache.buildIcon(iconCode, iconSize, color),
+                IconFontCache.buildIcon(iconCode, iconSize * HoverScaleIcon.DEFAULT_SCALE, color));
     }
 
     /**
@@ -337,7 +350,7 @@ public class NodeToolbar extends JPanel {
         // (measured via a throwaway jiconfont HOVER icon of the same font size —
         // the hover glyph is what gives the siblings' box its final size, since
         // HoverScaleIcon sizes the box to the larger of the two glyphs)
-        Icon siblingMetrics = IconFontSwing.buildIcon(FontAwesome.BARS, iconSize * HoverScaleIcon.DEFAULT_SCALE, Color.WHITE);
+        Icon siblingMetrics = IconFontCache.buildIcon(FontAwesome.BARS, iconSize * HoverScaleIcon.DEFAULT_SCALE, Color.WHITE);
         int box = Math.max(hoverSize,
                 Math.max(siblingMetrics.getIconWidth(), siblingMetrics.getIconHeight()));
         HoverScaleIcon.install(button,
@@ -689,7 +702,7 @@ public class NodeToolbar extends JPanel {
             if (result == JOptionPane.YES_OPTION) {
                 // Single lifecycle entry point (v4): NodeModule stops this profile's node.
                 NodeModule.getInstance().stopNode(profile.getName());
-                LOGGER.info("Stop requested for profile: {}", profile.getName());
+                nodeLogger().info("Stop requested for profile: " + profile.getName());
             }
         } else {
             // Currently stopped/ready/error -> start (NodeModule creates the
@@ -710,9 +723,9 @@ public class NodeToolbar extends JPanel {
                     onNodeStarted.onNodeStarted(started);
                 }
             } catch (Exception e) {
-                LOGGER.error("Start failed for profile: {}", profile.getName(), e);
+                nodeLogger().error("Start failed for profile: " + profile.getName(), e);
             }
-            LOGGER.info("Start requested for profile: {}", profile.getName());
+            nodeLogger().info("Start requested for profile: " + profile.getName());
         }
     }
 

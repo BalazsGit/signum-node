@@ -125,8 +125,10 @@ class ConfigPathsConsistencyTest {
             assertEquals("node", ModuleIds.NODE);
             assertEquals("database", ModuleIds.DATABASE);
             assertEquals("browser", ModuleIds.BROWSER);
+            assertEquals("system", ModuleIds.SYSTEM);
             assertEquals("profiles", ModuleIds.CATEGORY_PROFILES);
             assertEquals("logging", ModuleIds.CATEGORY_LOGGING);
+            assertEquals("runtime", ModuleIds.CATEGORY_LOGGING_RUNTIME);
             assertEquals("./conf", ConfigPaths.RUNTIME_CONF_ROOT);
             assertEquals("/conf/", ConfigPaths.CLASSPATH_PREFIX);
         }

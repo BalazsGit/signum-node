@@ -52,9 +52,9 @@ public class DatabaseLoggingProfile extends ModuleLoggingProfile {
         Map<String, String> defaults = new LinkedHashMap<>();
 
         // ── HikariCP connection pool ──
-        defaults.put("com.zaxxer.hikari.level", "WARNING");
+        defaults.put("com.zaxxer.hikari.level", "WARN");
         defaults.put("com.zaxxer.hikari.HikariConfig.level", "INFO");
-        defaults.put("com.zaxxer.hikari.pool.PoolBase.level", "SEVERE");
+        defaults.put("com.zaxxer.hikari.pool.PoolBase.level", "ERROR");
 
         // ── JOOQ query engine ──
         defaults.put("org.jooq.Constants.level", "OFF");
@@ -64,9 +64,9 @@ public class DatabaseLoggingProfile extends ModuleLoggingProfile {
         defaults.put("application.module.node.db.store.DerivedTableManager.level", "OFF");
 
         // ── Database drivers ──
-        defaults.put("org.marijb.jdbc.level", "WARNING");       // MariaDB
-        defaults.put("org.sqlite.level", "WARNING");             // SQLite
-        defaults.put("org.postgresql.level", "WARNING");          // PostgreSQL
+        defaults.put("org.marijb.jdbc.level", "WARN");       // MariaDB
+        defaults.put("org.sqlite.level", "WARN");             // SQLite
+        defaults.put("org.postgresql.level", "WARN");          // PostgreSQL
 
         LOGGER.debug("DatabaseLoggingProfile defaults initialized with {} entries", defaults.size());
         return Collections.unmodifiableMap(defaults);
