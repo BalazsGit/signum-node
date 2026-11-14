@@ -3,14 +3,23 @@ package application.module.node.gui.wizard;
 import application.module.node.gui.wizard.steps.DatabaseConnectionStep;
 import application.module.node.gui.wizard.steps.DatabaseInstallationStep;
 import application.module.node.gui.wizard.steps.DatabaseSelectionStep;
+import application.module.node.gui.wizard.steps.LoggingSelectionStep;
 import application.module.node.gui.wizard.steps.NodeConfigurationStep;
+import application.module.node.gui.wizard.steps.ProfileNameStep;
 import application.module.node.gui.wizard.steps.SummaryStep;
+import application.module.node.profile.NodeProfileRepository;
+import application.module.node.profile.ProfileNameSuggester;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * State machine of the node setup wizard (plan §1.6).
@@ -24,46 +33,75 @@ import java.util.function.Consumer;
  * step.
  * </p>
  * <p>
- * The step list is injectable so unit tests can drive the state machine with fake
- * steps or sandbox-bound real steps.
+ * The wizard also owns the <b>live profile-name preview</b>: the name step stores
+ * the user's custom name (or {@code null} for the suggested one), and the
+ * controller re-resolves the suggested name from the final context (network /
+ * engine / ports, SSOT: {@link ProfileNameSuggester}) on every context change —
+ * the dialog shows the result in its title bar.
+ * </p>
+ * <p>
+ * The step list and the "taken names" source are injectable so unit tests can
+ * drive the state machine with fake steps or sandbox-bound real steps.
  * </p>
  */
 public class NodeSetupWizardController {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(NodeSetupWizardController.class);
+
     private final List<WizardStep> steps;
     private final WizardContext context = new WizardContext();
     private final List<Consumer<WizardContext>> changeListeners = new ArrayList<>();
+    private final Supplier<Set<String>> takenNames;
     private int currentIndex = 0;
 
-    /** The canonical wizard chain (3 required + 3 skippable, plan §1.2). */
+    /** The canonical wizard chain (name + 3 required + 3 skippable, plan §1.2). */
     public NodeSetupWizardController() {
         this(defaultSteps());
     }
 
     /** @param steps ordered step list (must not be empty). */
     public NodeSetupWizardController(List<WizardStep> steps) {
+        this(steps, NodeSetupWizardController::repositoryTakenNames);
+    }
+
+    /**
+     * @param steps      ordered step list (must not be empty)
+     * @param takenNames source of the existing profile names for the suggested-name
+     *                   resolution (null → the repository discovery, the production SSOT)
+     */
+    public NodeSetupWizardController(List<WizardStep> steps, Supplier<Set<String>> takenNames) {
         if (steps == null || steps.isEmpty()) {
             throw new IllegalArgumentException("Wizard steps must not be null/empty");
         }
         this.steps = Collections.unmodifiableList(new ArrayList<>(steps));
+        this.takenNames = takenNames != null ? takenNames : NodeSetupWizardController::repositoryTakenNames;
         // Live context wiring: steps with a choice that alters the flow (the
-        // database-engine selection) mirror it into the shared context as soon as
-        // it changes and notify this controller, so context-dependent state (the
-        // "Step X of Y" count, the skip logic) adapts dynamically.
+        // profile name, the database-engine selection, the network/port options)
+        // mirror it into the shared context as soon as it changes and notify this
+        // controller, so context-dependent state (the "Step X of Y" count, the
+        // skip logic, the suggested-name preview) adapts dynamically.
         for (WizardStep step : this.steps) {
             step.bindContext(context);
             step.addChangeListener(this::fireChangeListeners);
         }
+        refreshNamePreview(context);
     }
 
     /** The default step chain (SSOT of the wizard flow). */
     public static List<WizardStep> defaultSteps() {
         return Arrays.asList(
+                new ProfileNameStep(),
                 new DatabaseSelectionStep(),
                 new DatabaseInstallationStep(),
                 new DatabaseConnectionStep(),
                 new NodeConfigurationStep(),
+                new LoggingSelectionStep(),
                 new SummaryStep());
+    }
+
+    /** The production "taken names" source (SSOT: the repository discovery). */
+    private static Set<String> repositoryTakenNames() {
+        return new HashSet<>(NodeProfileRepository.discoverProfileNames());
     }
 
     public WizardContext getContext() {
@@ -137,8 +175,41 @@ public class NodeSetupWizardController {
     }
 
     private void fireChangeListeners(WizardContext changed) {
+        refreshNamePreview(changed);
         for (Consumer<WizardContext> listener : changeListeners) {
             listener.accept(changed);
+        }
+    }
+
+    /**
+     * Re-resolves the context's profile name: a custom name (step 1) is used
+     * as-is; otherwise the suggested name is recomputed from the CURRENT context
+     * (network / engine — the ports no longer rename the profile, so back /
+     * forth navigation never changes it; SSOT: {@link ProfileNameSuggester}) so
+     * the title-bar preview follows the selections of the later steps.
+     */
+    void refreshNamePreview(WizardContext ctx) {
+        if (ctx.getCustomName() != null) {
+            // "Custom name" is selected: the name is EXACTLY the user's text — an
+            // empty field keeps an empty name (the title bar then shows no name),
+            // never a suggested fallback.
+            ctx.setName(ctx.getCustomName().trim());
+            return;
+        }
+        try {
+            String engineKey = ctx.getEngine() == null ? null : ctx.getEngine().getSettingsKey();
+            String base = ProfileNameSuggester.baseName(ctx.getNetwork().getDisplayName(), engineKey, false, 0);
+            // The profile still being created must not count as "taken", or the
+            // suggested name would increment (_01 → _02 → …) on every re-resolve
+            // while the wizard's own scratch profile exists on disk.
+            Set<String> taken = new HashSet<>(takenNames.get());
+            if (ctx.getName() != null) {
+                taken.remove(ctx.getName());
+            }
+            ctx.setName(ProfileNameSuggester.nextAvailableName(base, taken));
+        } catch (RuntimeException e) {
+            // The live preview must never break navigation (transient states).
+            LOGGER.warn("Could not refresh the suggested profile name", e);
         }
     }
 
@@ -156,6 +227,7 @@ public class NodeSetupWizardController {
             return error;
         }
         currentStep().onExit(context);
+        refreshNamePreview(context);
         while (currentIndex < steps.size() - 1) {
             currentIndex++;
             if (currentStep().autoSkip(context)) {
@@ -198,6 +270,7 @@ public class NodeSetupWizardController {
             return error;
         }
         currentStep().onExit(context);
+        refreshNamePreview(context);
         return null;
     }
 }

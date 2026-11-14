@@ -3,6 +3,7 @@ package application.module.node.gui.wizard.steps;
 import application.module.database.gui.DatabaseConfigurationPanel.DatabaseEngine;
 import application.module.node.gui.wizard.ConflictHighlighter;
 import application.module.node.gui.wizard.WizardContext;
+import application.module.node.gui.wizard.WizardTexts;
 import application.module.node.gui.wizard.WizardStep;
 import application.module.node.profile.NodeProfile;
 import application.module.node.profile.ProfileConflictDetector;
@@ -34,15 +35,14 @@ public class SummaryStep implements WizardStep {
 
     private final JPanel panel = new JPanel();
     private final JTextArea text = new JTextArea(12, 46);
-    private final JLabel conflictLabel = new JLabel();
+    private final javax.swing.JEditorPane conflictLabel = WizardTexts.info("");
     private final JCheckBox startNow = new JCheckBox("Start the node immediately after creation", true);
 
     public SummaryStep() {
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setOpaque(false);
 
-        JLabel title = new JLabel("3. Summary — review before creating the profile");
-        title.setFont(GuiFontManager.getBoldScaledDefaultFont(KEYWORD_FONT_SCALE));
+        javax.swing.JEditorPane title = WizardTexts.heading("Summary — review before creating the profile");
         panel.add(title);
 
         text.setEditable(false);
@@ -52,7 +52,7 @@ public class SummaryStep implements WizardStep {
         scroll.setPreferredSize(new java.awt.Dimension(460, 180));
         panel.add(scroll);
 
-        GuiFontManager.applyDefaultFont(conflictLabel);
+        conflictLabel.setAlignmentX(0f);
         panel.add(conflictLabel);
         panel.add(startNow);
     }
@@ -62,7 +62,7 @@ public class SummaryStep implements WizardStep {
     public void onEnter(WizardContext context) {
         StringBuilder sb = new StringBuilder();
         sb.append("Profile name : ").append(nvl(context.getName())).append('\n');
-        sb.append("Network      : ").append(context.isTestnet() ? "testnet" : "mainnet").append('\n');
+        sb.append("Network      : ").append(context.getNetwork().getDisplayName()).append('\n');
         sb.append("Database     : ").append(describeDb(context)).append('\n');
         sb.append("Ports        : ").append(describePorts(context)).append('\n');
         text.setText(sb.toString());
@@ -70,14 +70,14 @@ public class SummaryStep implements WizardStep {
         List<ProfileConflictDetector.Conflict> conflicts =
                 ConflictHighlighter.findConflicts(candidate(context));
         if (conflicts.isEmpty()) {
-            conflictLabel.setText("No resource conflicts with existing profiles.");
+            conflictLabel.setText(WizardTexts.wrap("No resource conflicts with existing profiles."));
             conflictLabel.setForeground(Color.GREEN.darker());
         } else {
             StringBuilder warn = new StringBuilder("CONFLICTS: ");
             for (ProfileConflictDetector.Conflict c : conflicts) {
                 warn.append(ConflictHighlighter.describeConflict(c)).append("; ");
             }
-            conflictLabel.setText(warn.toString());
+            conflictLabel.setText(WizardTexts.wrap(warn.toString()));
             conflictLabel.setForeground(new Color(198, 40, 40));
         }
     }
@@ -99,9 +99,6 @@ public class SummaryStep implements WizardStep {
     }
 
     private String describePorts(WizardContext context) {
-        if (context.isUseDefaultPorts()) {
-            return "defaults (per-profile band assigned at creation)";
-        }
         return "API=" + nvl(String.valueOf(context.getApiPort()))
                 + " P2P=" + nvl(String.valueOf(context.getP2pPort()))
                 + " WS=" + nvl(String.valueOf(context.getWsPort()));
@@ -116,7 +113,7 @@ public class SummaryStep implements WizardStep {
         String name = context.getName() == null ? "wizard-candidate" : context.getName();
         NodeProfile candidate = new NodeProfile(name);
         Properties props = new Properties();
-        ProfileCreateDefaults.applyNetwork(props, context.isTestnet());
+        ProfileCreateDefaults.applyNetwork(props, context.getNetwork());
         if (context.getEngine() == DatabaseEngine.SQLITE) {
             // The user-configured DB.Url of the database step wins; an untouched
             // SQLite setup falls back to the per-profile SSOT URL.
@@ -130,7 +127,7 @@ public class SummaryStep implements WizardStep {
                     context.getDbHost(), context.getDbPort(),
                     context.getDbUser(), context.getDbPassword(), context.getDbName());
         }
-        if (context.isUseDefaultPorts()) {
+        if (context.getApiPort() == null && context.getP2pPort() == null && context.getWsPort() == null) {
             ProfileCreateDefaults.applyPorts(props, name);
         } else {
             if (context.getApiPort() != null) props.setProperty("API.Port", String.valueOf(context.getApiPort()));
@@ -174,9 +171,9 @@ public class SummaryStep implements WizardStep {
 
     @Override
     public boolean autoSkip(WizardContext context) {
-        // SQLite walks a 3-step flow (selection → database configuration → node
-        // configuration): the node-configuration step is its last step, so the summary
-        // is skipped and the wizard finishes there.
+        // SQLite skips the server-only installation step, so its visible flow is
+        // selection, database configuration, node configuration, then logging: the
+        // logging step is its last step, so the summary is skipped for SQLite.
         return context.getEngine() == DatabaseEngine.SQLITE;
     }
 

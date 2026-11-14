@@ -1,6 +1,11 @@
 package application.module.node.gui.wizard;
 
 import application.module.database.gui.DatabaseConfigurationPanel.DatabaseEngine;
+import application.module.node.profile.Network;
+
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 /**
  * Mutable state carried across the setup wizard steps.
@@ -12,10 +17,10 @@ import application.module.database.gui.DatabaseConfigurationPanel.DatabaseEngine
  */
 public class WizardContext {
 
-    // ── Step 1: database engine ──────────────────────────────────────────
+    // ── Database engine selection ─────────────────────────────────────────
     private DatabaseEngine engine = DatabaseEngine.SQLITE;
 
-    // ── Step 1.1: database installation / connection ─────────────────────
+    // ── Database installation / connection ────────────────────────────────
     private boolean dbInstallSkipped = true; // true → download/install not completed in the wizard
     private boolean skipDbSetup = true;
     private String dbHost = "localhost";
@@ -23,20 +28,68 @@ public class WizardContext {
     private String dbUser = "signum";
     private String dbPassword = "";
     private String dbName = "signum";
+    private String dbUrlSuffix; // the query string (with the leading '?'), e.g. "?useSSL=false"
 
-    // ── Step 1.2: SQLite DB.Url (the configuration panel's db.url editor) ──
+    // ── SQLite DB.Url (the configuration panel's db.url editor) ───────────
     private String sqliteDbUrl;         // null → the per-profile SSOT URL applies at finish
     private String sqliteDbProfileName; // null → the companion DB profile is the node profile name
+    // G3: database-source selection (custom URL / an existing profile / a new profile).
+    /**
+     * The database-profile name selected in the database step (an existing profile,
+     * or one created via the database-profile wizard). {@code null} for the "custom
+     * database URL" source — the manual connection step then applies.
+     */
+    private String selectedDbProfileName;
+    // G5: logging-profile selection (an existing profile, or one created via the logging-profile wizard).
+    /**
+     * The logging-profile name selected in the logging step (an existing profile, or
+     * one created via the logging-profile wizard). {@code null} → the default logging
+     * seeding applies (SSOT:
+     * {@link application.module.node.profile.ProfileRuntimeService#seedDefaultLoggingAssignment}).
+     */
+    private String selectedLoggingProfileName;
+    // G6 (AD-03): the database profiles CREATED during this wizard session. On a
+    // cancel they REMAIN on disk (v2, AD-06) — they are independent Database-module
+    // entities the user manages there. Tracked so the wizard's own re-navigation can
+    // never delete a pre-existing (non-session-created) profile.
+    private final Set<String> sessionDbProfilesCreated = new LinkedHashSet<>();
 
-    // ── Step 2: node configuration ───────────────────────────────────────
+    // ── Step 1: profile name ─────────────────────────────────────────────
+    /**
+     * The user's custom profile name (step 1). {@code null} when the "use
+     * suggested name" option is selected — the suggested name is then resolved
+     * from the final context by the wizard controller (SSOT:
+     * {@link application.module.node.profile.ProfileNameSuggester}).
+     */
+    private String customName;
+    /**
+     * The resolved profile name — the live preview shown in the wizard's title
+     * bar (and the final name after finish). Suggested names track the context
+     * (network / engine / ports) as it changes; a custom name is fixed.
+     */
     private String name;
-    private boolean testnet = false;
-    private boolean useDefaultPorts = true;
-    private Integer apiPort; // null → default
-    private Integer p2pPort; // null → default
-    private Integer wsPort;  // null → default
+    /**
+     * The wizard's <b>virtual in-memory profile</b> — the full property set of
+     * the node profile being created, held in memory (a
+     * {@link application.module.node.profile.NodeProfile} WITHOUT a file path)
+     * from the first visit of the node-configuration step
+     * until the finish step. The profile FILE is created only on Finish
+     * (SSOT: {@link WizardFinish}): while the wizard runs, the suggested name
+     * can never count the session's own profile as "taken" (no file exists to
+     * discover) and a cancel leaves nothing to clean up. {@code null} until
+     * the node-configuration step is first visited — a finish without it
+     * persists the plain {@link WizardFinish#buildProperties} mapping of this
+     * context.
+     */
+    private application.module.node.profile.NodeProfile virtualProfile;
+    // ── Node configuration step: network + ports ─────────────────────────
+    /** The network decided in the FIRST step (part of the suggested name, SSOT: {@link Network}). */
+    private Network network = Network.MAINNET;
+    private Integer apiPort; // null → not collected yet (the step's fields hold the default)
+    private Integer p2pPort; // null → not collected yet
+    private Integer wsPort;  // null → not collected yet
 
-    // ── Step 4: summary ──────────────────────────────────────────────────
+    // ── Summary step ──────────────────────────────────────────────────────
     private boolean startImmediately = true;
 
     public DatabaseEngine getEngine() {
@@ -103,6 +156,28 @@ public class WizardContext {
         this.dbName = dbName;
     }
 
+    /**
+     * The server JDBC URL suffix — the query string with its leading {@code ?}
+     * (e.g. {@code ?useSSL=false}), matching the editor's Suffix field (SSOT:
+     * {@code DatabaseConfigurationUtils#JDBC_URL_PATTERN} group 5). {@code null}
+     * when the URL carries no query string.
+     */
+    public String getDbUrlSuffix() {
+        return dbUrlSuffix;
+    }
+
+    public void setDbUrlSuffix(String dbUrlSuffix) {
+        this.dbUrlSuffix = dbUrlSuffix;
+    }
+
+    public String getCustomName() {
+        return customName;
+    }
+
+    public void setCustomName(String customName) {
+        this.customName = customName;
+    }
+
     public String getName() {
         return name;
     }
@@ -111,20 +186,27 @@ public class WizardContext {
         this.name = name;
     }
 
-    public boolean isTestnet() {
-        return testnet;
+    /**
+     * @return the wizard's virtual in-memory profile (see {@link #virtualProfile}),
+     * or {@code null} until the advanced editor is opened
+     */
+    public application.module.node.profile.NodeProfile getVirtualProfile() {
+        return virtualProfile;
     }
 
-    public void setTestnet(boolean testnet) {
-        this.testnet = testnet;
+    /**
+     * @param virtualProfile the wizard's virtual in-memory profile (null clears it)
+     */
+    public void setVirtualProfile(application.module.node.profile.NodeProfile virtualProfile) {
+        this.virtualProfile = virtualProfile;
     }
 
-    public boolean isUseDefaultPorts() {
-        return useDefaultPorts;
+    public Network getNetwork() {
+        return network;
     }
 
-    public void setUseDefaultPorts(boolean useDefaultPorts) {
-        this.useDefaultPorts = useDefaultPorts;
+    public void setNetwork(Network network) {
+        this.network = network == null ? Network.MAINNET : network;
     }
 
     public Integer getApiPort() {
@@ -185,5 +267,36 @@ public class WizardContext {
 
     public void setStartImmediately(boolean startImmediately) {
         this.startImmediately = startImmediately;
+    }
+
+    public String getSelectedDbProfileName() {
+        return selectedDbProfileName;
+    }
+
+    public void setSelectedDbProfileName(String selectedDbProfileName) {
+        this.selectedDbProfileName = selectedDbProfileName;
+    }
+
+    public String getSelectedLoggingProfileName() {
+        return selectedLoggingProfileName;
+    }
+
+    public void setSelectedLoggingProfileName(String selectedLoggingProfileName) {
+        this.selectedLoggingProfileName = selectedLoggingProfileName;
+    }
+
+    /**
+     * G6 (AD-03): records a database profile created during this wizard session
+     * (null / blank-safe). Such profiles REMAIN on disk after a cancel (v2, AD-06).
+     */
+    public void markDbProfileCreated(String name) {
+        if (name != null && !name.isBlank()) {
+            sessionDbProfilesCreated.add(name.trim());
+        }
+    }
+
+    /** @return an unmodifiable view of the database profiles created this session (AD-03). */
+    public Set<String> getSessionDbProfilesCreated() {
+        return Collections.unmodifiableSet(sessionDbProfilesCreated);
     }
 }

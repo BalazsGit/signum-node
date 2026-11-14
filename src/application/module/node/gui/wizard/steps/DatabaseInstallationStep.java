@@ -5,6 +5,7 @@ import application.module.database.gui.MariaDBConfigurationPanel;
 import application.module.database.gui.PostgreSQLConfigurationPanel;
 import application.module.database.utils.DatabaseConfigurationUtils;
 import application.module.node.gui.wizard.WizardContext;
+import application.module.node.gui.wizard.WizardTexts;
 import application.module.node.gui.wizard.WizardStep;
 import application.utils.gui.GuiFontManager;
 import jiconfont.icons.font_awesome.FontAwesome;
@@ -13,7 +14,6 @@ import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
-import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.ScrollPaneConstants;
@@ -42,7 +42,7 @@ import java.util.function.Function;
 public class DatabaseInstallationStep implements WizardStep {
 
     private final JPanel panel = new JPanel();
-    private final JLabel statusLabel = new JLabel(" ");
+    private final javax.swing.JEditorPane statusLabel = WizardTexts.info(" ");
     private final JCheckBox skipCheck = new JCheckBox("Skip — the database is already installed / I will install it manually");
     private final JPanel embeddedSlot = new JPanel(new BorderLayout());
     private final Function<DatabaseEngine, JComponent> embeddedFactory;
@@ -68,10 +68,9 @@ public class DatabaseInstallationStep implements WizardStep {
 
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setOpaque(false);
-        panel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        panel.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
 
-        statusLabel.setFont(statusLabel.getFont().deriveFont(java.awt.Font.BOLD, 13f));
-        GuiFontManager.applyDefaultFont(statusLabel);
+        statusLabel.setAlignmentX(0f);
         panel.add(statusLabel);
 
         embeddedSlot.setOpaque(false);
@@ -163,9 +162,10 @@ public class DatabaseInstallationStep implements WizardStep {
             embeddedSlot.setVisible(!installed);
             initialized = true;
         }
-        statusLabel.setText(installed
+        String status = installed
                 ? engine.getDisplayName() + " is already installed — you may review/reconfigure it below."
-                : engine.getDisplayName() + " is not installed yet — use the installer below (Download → Initialize).");
+                : engine.getDisplayName() + " is not installed yet — use the installer below (Download → Initialize).";
+        statusLabel.setText(WizardTexts.wrap(status));
 
         // Lazily build the embedded installer panel only when it is actually shown.
         if (!skipCheck.isSelected()) {

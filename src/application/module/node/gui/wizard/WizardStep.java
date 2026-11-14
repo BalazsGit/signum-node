@@ -54,6 +54,22 @@ public interface WizardStep {
      */
     String validate(WizardContext context);
 
+    /**
+     * GUI hook the dialog calls before leaving the step (a Next or Finish
+     * click). A step that needs an explicit user confirmation to move on
+     * (e.g. the SQLite database step confirming the database that will be
+     * created, or the node-configuration step with the full editor open and
+     * unsaved changes) can show its dialog here.
+     *
+     * @param parent   the wizard dialog (may be null in headless use)
+     * @param context  the shared wizard context
+     * @return {@code true} to proceed with the navigation, {@code false} to
+     *         stay on the step (the user keeps editing)
+     */
+    default boolean confirmExit(java.awt.Window parent, WizardContext context) {
+        return true;
+    }
+
     /** Collects this step's UI state into the context (on navigate-away / finish). */
     default void onExit(WizardContext context) {
     }

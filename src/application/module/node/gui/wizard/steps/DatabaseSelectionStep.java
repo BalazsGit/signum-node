@@ -1,8 +1,11 @@
 package application.module.node.gui.wizard.steps;
 
 import application.module.database.gui.DatabaseConfigurationPanel.DatabaseEngine;
+import application.module.node.gui.wizard.ServerDatabaseProfileWizard;
+import application.module.node.gui.wizard.SqliteDatabaseProfileWizard;
 import application.module.node.gui.wizard.WizardContext;
 import application.module.node.gui.wizard.WizardStep;
+import application.module.node.gui.wizard.WizardTexts;
 import application.utils.gui.GuiFontManager;
 import jiconfont.icons.font_awesome.FontAwesome;
 
@@ -13,7 +16,6 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JRadioButton;
-import javax.swing.SwingConstants;
 import java.awt.BorderLayout;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -22,7 +24,7 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * Wizard step 1 — database engine selection (SSOT: {@link DatabaseEngine}).
+ * Wizard step 2 — database engine selection (SSOT: {@link DatabaseEngine}).
  * <p>
  * Traditional radio-button layout (one plain entry per engine). Selecting an
  * engine updates the "Engine details" panel below with the engine's official
@@ -34,21 +36,30 @@ public class DatabaseSelectionStep implements WizardStep {
 
     private static final int DETAILS_LOGO_SIZE = 48;
 
-    private final JPanel panel = new JPanel();
+    /**
+     * The step's root container: it keeps the content
+     * <b>top-anchored</b> (the same structure as the other steps). The dialog
+     * stretches every step panel to the full available height — without this
+     * the extra space would be handed to the stretchable text panes, opening
+     * visible blank gaps between the rows.
+     */
+    private final JPanel panel = new JPanel(new BorderLayout());
     private final ButtonGroup group = new ButtonGroup();
     private final Map<DatabaseEngine, JRadioButton> buttons = new LinkedHashMap<>();
 
     private final JLabel logoLabel = new JLabel();
-    private final JLabel engineNameLabel = new JLabel();
+    private final javax.swing.JEditorPane engineNameLabel = WizardTexts.heading("");
     // The details section keywords (headings, KEYWORD_FONT_SCALE bigger) and the
-    // section body texts (default font, HTML-wrapped) as separate labels — Swing's
-    // HTML font sizes cannot express a proportional 120% step on one combined label.
-    private final JLabel descriptionKey = new JLabel("Description");
-    private final JLabel setupKey = new JLabel("Setup required");
-    private final JLabel usageKey = new JLabel("Best for");
-    private final JLabel descriptionText = new JLabel();
-    private final JLabel setupText = new JLabel();
-    private final JLabel usageText = new JLabel();
+    // section body texts (default font, HTML-wrapped) as separate selectable
+    // text panes — Swing's HTML font sizes cannot express a proportional 120%
+    // step on one combined label, and every display text of the wizard must
+    // stay selectable.
+    private final javax.swing.JEditorPane descriptionKey = WizardTexts.heading("Description");
+    private final javax.swing.JEditorPane setupKey = WizardTexts.heading("Setup required");
+    private final javax.swing.JEditorPane usageKey = WizardTexts.heading("Best for");
+    private final javax.swing.JEditorPane descriptionText = WizardTexts.info("");
+    private final javax.swing.JEditorPane setupText = WizardTexts.info("");
+    private final javax.swing.JEditorPane usageText = WizardTexts.info("");
     private DatabaseEngine shownEngine = null;
 
     /** Live navigation context (bound by the controller; null in standalone use). */
@@ -56,22 +67,32 @@ public class DatabaseSelectionStep implements WizardStep {
     private final List<Consumer<WizardContext>> changeListeners = new ArrayList<>();
 
     public DatabaseSelectionStep() {
-        // BorderLayout (NOT BoxLayout) so the "Engine details" box below the radios
-        // always spans the FULL panel width: its content (logo/text) changes width per
-        // engine, and a BoxLayout would re-center the width-varying box on every
-        // selection — the radio section visually "wandered" left/right. Here the radio
-        // group stays pinned top-left and only the details CONTENT changes.
-        panel.setLayout(new BorderLayout(0, 10));
         panel.setOpaque(false);
+
+        // The step content: the same 4 px border as every other step, so the
+        // main title lands at exactly the same spot as the previous step's.
+        // BorderLayout (NOT BoxLayout) so the "Engine details" box below the
+        // radios always spans the FULL content width: its content (logo/text)
+        // changes width per engine, and a BoxLayout would re-center the
+        // width-varying box on every selection — the radio section visually
+        // "wandered" left/right. Here the radio group stays pinned top-left
+        // and only the details CONTENT changes.
+        JPanel content = new JPanel(new BorderLayout(0, 6));
+        content.setOpaque(false);
+        content.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
 
         JPanel top = new JPanel();
         top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
         top.setOpaque(false);
 
-        JLabel title = new JLabel("1. Select the database engine for this node");
-        title.setFont(GuiFontManager.getBoldScaledDefaultFont(KEYWORD_FONT_SCALE));
+        javax.swing.JEditorPane title = WizardTexts.heading("Select the database engine for this node");
         title.setAlignmentX(0f);
         top.add(title);
+
+        // A normal empty line between the title and the engine selection.
+        javax.swing.JEditorPane blankLine = WizardTexts.info("");
+        blankLine.setAlignmentX(0f);
+        top.add(blankLine);
 
         for (DatabaseEngine engine : DatabaseEngine.values()) {
             JRadioButton button = new JRadioButton(engine.getDisplayName());
@@ -88,9 +109,9 @@ public class DatabaseSelectionStep implements WizardStep {
             buttons.put(engine, button);
             top.add(button);
         }
-        panel.add(top, BorderLayout.NORTH);
+        content.add(top, BorderLayout.NORTH);
 
-        JPanel details = new JPanel(new BorderLayout(10, 6));
+        JPanel details = new JPanel(new BorderLayout(8, 4));
         details.setOpaque(false);
         details.setBorder(BorderFactory.createTitledBorder("Engine details"));
 
@@ -100,37 +121,46 @@ public class DatabaseSelectionStep implements WizardStep {
         header.setLayout(new BoxLayout(header, BoxLayout.Y_AXIS));
         header.setOpaque(false);
         GuiFontManager.applyDefaultFont(logoLabel);
-        engineNameLabel.setFont(GuiFontManager.getBoldScaledDefaultFont(KEYWORD_FONT_SCALE));
         logoLabel.setAlignmentX(0f);
         engineNameLabel.setAlignmentX(0f);
         header.add(logoLabel);
         header.add(javax.swing.Box.createVerticalStrut(4));
         header.add(engineNameLabel);
+        // A normal empty line below the engine name (before the section keywords).
+        javax.swing.JEditorPane nameGap = WizardTexts.info("");
+        nameGap.setAlignmentX(0f);
+        header.add(nameGap);
         details.add(header, BorderLayout.NORTH);
 
         // Body: one section per property (keyword heading + wrapped text).
         JPanel detailsBody = new JPanel();
         detailsBody.setLayout(new BoxLayout(detailsBody, BoxLayout.Y_AXIS));
         detailsBody.setOpaque(false);
-        for (JLabel key : new JLabel[] { descriptionKey, setupKey, usageKey }) {
-            key.setFont(GuiFontManager.getBoldScaledDefaultFont(KEYWORD_FONT_SCALE));
+        for (javax.swing.JEditorPane key : new javax.swing.JEditorPane[] { descriptionKey, setupKey, usageKey }) {
             key.setAlignmentX(0f);
         }
-        for (JLabel body : new JLabel[] { descriptionText, setupText, usageText }) {
-            GuiFontManager.applyDefaultFont(body);
-            body.setVerticalAlignment(SwingConstants.TOP);
+        for (javax.swing.JEditorPane body : new javax.swing.JEditorPane[] { descriptionText, setupText, usageText }) {
             body.setAlignmentX(0f);
         }
         detailsBody.add(descriptionKey);
         detailsBody.add(descriptionText);
-        detailsBody.add(javax.swing.Box.createVerticalStrut(8));
+        detailsBody.add(javax.swing.Box.createVerticalStrut(4));
         detailsBody.add(setupKey);
         detailsBody.add(setupText);
-        detailsBody.add(javax.swing.Box.createVerticalStrut(8));
+        detailsBody.add(javax.swing.Box.createVerticalStrut(4));
         detailsBody.add(usageKey);
         detailsBody.add(usageText);
         details.add(detailsBody, BorderLayout.CENTER);
-        panel.add(details, BorderLayout.CENTER); // full width, stable on every selection
+        // The "Engine details" box spans the full content width (stable across
+        // engine selections). The database source (a dedicated URL vs. a linked
+        // database profile) is decided on the NEXT step — the database-configuration
+        // step's "Linked Database Profile" checkbox — so it is not offered here.
+        content.add(details, BorderLayout.CENTER);
+
+        // Top-anchored: the dialog stretches the step's root panel to the full
+        // available height — NORTH keeps the content at its preferred height
+        // and leaves the extra space below (see the panel field's javadoc).
+        panel.add(content, BorderLayout.NORTH);
 
         select(DatabaseEngine.SQLITE); // initial details for the preselected engine
     }
@@ -143,13 +173,13 @@ public class DatabaseSelectionStep implements WizardStep {
         }
         shownEngine = engine;
         logoLabel.setIcon(engine.getLogoIcon(DETAILS_LOGO_SIZE));
-        engineNameLabel.setText(engine.getDisplayName());
+        engineNameLabel.setText(WizardTexts.wrap(WizardTexts.escape(engine.getDisplayName())));
         updateDetailsTexts(engine);
         panel.revalidate();
         // Live: the engine drives which steps the wizard walks through (SQLite
-        // skips the installation and connection steps). Mirror the choice into
-        // the shared context immediately and let the controller refresh the
-        // context-dependent state (the "Step X of Y" indicator) dynamically.
+        // skips the installation step). Mirror the choice into the shared context
+        // immediately and let the controller refresh the context-dependent state
+        // (the "Step X of Y" indicator) dynamically.
         if (boundContext != null) {
             boundContext.setEngine(engine);
             for (Consumer<WizardContext> listener : changeListeners) {
@@ -164,9 +194,41 @@ public class DatabaseSelectionStep implements WizardStep {
      * default font (HTML-wrapped so long descriptions wrap in the panel).
      */
     private void updateDetailsTexts(DatabaseEngine engine) {
-        descriptionText.setText("<html>" + engine.getDescription() + "</html>");
-        setupText.setText("<html>" + engine.getSetupRequirements() + "</html>");
-        usageText.setText("<html>" + engine.getUsageNotes() + "</html>");
+        descriptionText.setText(WizardTexts.wrap(engine.getDescription()));
+        setupText.setText(WizardTexts.wrap(engine.getSetupRequirements()));
+        usageText.setText(WizardTexts.wrap(engine.getUsageNotes()));
+    }
+
+    /**
+     * Launches the engine's database-profile wizard and returns the created profile
+     * name (or {@code null} when the user cancelled). The {@code "+"} buttons of the
+     * database-configuration surfaces implement this contract (the install wizard's
+     * step and the node configuration's DB.Url row share the behavior, and the tests
+     * substitute a headless implementation).
+     */
+    @FunctionalInterface
+    public interface DatabaseProfileWizardLauncher {
+        /**
+         * @param engine                 the engine of the profile to create
+         * @param suggestedProfileName   the profile name to prefill in the wizard,
+         *                               or {@code null} for no prefill
+         * @return the created profile name, or {@code null} when cancelled
+         */
+        String create(DatabaseEngine engine, String suggestedProfileName);
+    }
+
+    /**
+     * The default profile-wizard launcher (SSOT): the SQLite database-profile wizard
+     * (G1) for SQLite, the server database-profile wizard (G2) for the server engines,
+     * prefilled with the suggested profile name ({@code null}/blank: no prefill).
+     * Public so the node configuration's DB.Url row (a different package) reuses the
+     * exact same engine → wizard mapping.
+     */
+    public static String defaultProfileWizardLauncher(DatabaseEngine engine, String suggestedProfileName) {
+        if (engine == DatabaseEngine.SQLITE) {
+            return SqliteDatabaseProfileWizard.show(null, suggestedProfileName);
+        }
+        return ServerDatabaseProfileWizard.show(null, engine, suggestedProfileName);
     }
 
     /** @return the currently selected engine (never null; default SQLite). */
@@ -221,5 +283,14 @@ public class DatabaseSelectionStep implements WizardStep {
     @Override
     public void onExit(WizardContext context) {
         context.setEngine(getSelectedEngine());
+    }
+
+    @Override
+    public void onEnter(WizardContext context) {
+        // The engine is re-selectable on back — restore the details for it.
+        DatabaseEngine engine = context.getEngine() == null ? DatabaseEngine.SQLITE : context.getEngine();
+        if (engine != shownEngine) {
+            select(engine);
+        }
     }
 }
