@@ -9,10 +9,10 @@ import com.google.gson.JsonParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.Reader;
+import java.io.StringReader;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -23,6 +23,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -64,6 +65,27 @@ public class ProfileConfig {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ProfileConfig.class);
     private static final String DEFAULT_CONFIG_PATH = "conf/node/profiles.json";
+
+    /**
+     * P8/F3: shared raw-JSON cache keyed by {@code (configPath, mtime, size)}. The GUI
+     * creates many {@link ProfileConfig} instances at boot (per lazy-loaded panel,
+     * logging panel, tab-order, ...), each of which re-read the SAME {@code profiles.json};
+     * this cache turns those ~40 redundant full-file reads into a single one. Each
+     * instance still parses its OWN copy from the cached raw text, so there is no
+     * aliasing between instances (a mutation in one never leaks into another).
+     */
+    private static final Map<Path, CachedRaw> RAW_CACHE = new ConcurrentHashMap<>();
+
+    private static final class CachedRaw {
+        final long mtime;
+        final long size;
+        final String raw;
+        CachedRaw(long mtime, long size, String raw) {
+            this.mtime = mtime;
+            this.size = size;
+            this.raw = raw;
+        }
+    }
     private final Path configPath;
     private final Gson gson;
     private ProfileData profileData;
@@ -304,13 +326,16 @@ public class ProfileConfig {
             return profileData;
         }
 
-        try (FileReader reader = new FileReader(configPath.toFile())) {
-            profileData = gson.fromJson(reader, ProfileData.class);
+        try {
+            // P8/F3: read the raw JSON through the shared (path, mtime, size) cache so the
+            // many ProfileConfig instances created at boot share ONE full-file read.
+            String raw = readRawCached();
+            profileData = gson.fromJson(new StringReader(raw), ProfileData.class);
             if (profileData == null) {
                 profileData = createDefault();
                 save();
             }
-            LOGGER.info("Loaded profiles config from {}: {} profiles found",
+            LOGGER.debug("Loaded profiles config from {}: {} profiles found",
                     configPath, profileData.getProfiles().size());
         } catch (IOException e) {
             LOGGER.warn("Could not load profiles config from {}, creating default", configPath);
@@ -324,6 +349,23 @@ public class ProfileConfig {
 
         migrateLegacyMetadata();
         return profileData;
+    }
+
+    /**
+     * P8/F3: reads the raw file contents, served from the shared cache while the file's
+     * {@code (mtime, size)} is unchanged. A disk read happens only on the first access or
+     * after the file changes on disk.
+     */
+    private String readRawCached() throws IOException {
+        long mtime = Files.getLastModifiedTime(configPath).toMillis();
+        long size = Files.size(configPath);
+        CachedRaw hit = RAW_CACHE.get(configPath);
+        if (hit != null && hit.mtime == mtime && hit.size == size) {
+            return hit.raw;
+        }
+        String raw = new String(Files.readAllBytes(configPath), StandardCharsets.UTF_8);
+        RAW_CACHE.put(configPath, new CachedRaw(mtime, size, raw));
+        return raw;
     }
 
     /**

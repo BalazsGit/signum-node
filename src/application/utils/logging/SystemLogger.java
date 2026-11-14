@@ -39,8 +39,17 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class SystemLogger extends LoggerImpl {
 
-    /** Number of most-recent events retained for late-attaching GUI consoles. */
-    static final int BUFFER_SIZE = 500;
+    /**
+     * Number of most-recent events retained for late-attaching GUI consoles.
+     * <p>
+     * F4 (console SSOT): aligned with the system console line-cap L0 default
+     * ({@link ConsoleLimits#DEFAULT_SYSTEM_MAX_LINES}), so the System Console replay
+     * buffer covers the same history the console can display. It is a compile-time
+     * constant (the singleton is created before any profile layer is loaded), so it
+     * tracks the L0 default rather than a live L1/L2 override.
+     * </p>
+     */
+    static final int BUFFER_SIZE = ConsoleLimits.DEFAULT_SYSTEM_MAX_LINES;
 
     private static volatile SystemLogger instance;
     private static final Object LOCK = new Object();

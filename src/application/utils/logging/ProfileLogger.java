@@ -61,8 +61,16 @@ public final class ProfileLogger extends LoggerImpl {
 
     // ── Replay buffer (late-subscriber support) ───────────────────────────
 
-    /** Configured maximum number of events retained for replay (always > 0). */
-    private final int replayCapacity;
+    /**
+     * Configured maximum number of events retained for replay (always &gt; 0).
+     * <p>
+     * Volatile because {@link #setReplayCapacity(int)} may adjust it after
+     * construction (e.g. the node aligns it with the resolved console line cap);
+     * the reads inside {@link #dispatch(LogEvent)} are additionally ordered by
+     * {@link #replayLock}.
+     * </p>
+     */
+    private volatile int replayCapacity;
 
     /**
      * Guards the replay buffer and orders {@link #dispatch(LogEvent)} against
@@ -160,6 +168,33 @@ public final class ProfileLogger extends LoggerImpl {
     /** @return the maximum number of events retained for replay (always &gt; 0) */
     public int getReplayCapacity() {
         return replayCapacity;
+    }
+
+    /**
+     * Adjusts the maximum number of events retained for replay.
+     * <p>
+     * The node uses this to align the replay buffer with the effective console line
+     * cap (the SSOT for "how many lines the console shows"), so a late-attaching
+     * console tab replays the same history the console can display instead of the
+     * fixed {@link #DEFAULT_REPLAY_CAPACITY}. If the new capacity is smaller than the
+     * current buffer, the oldest events are trimmed. Safe to call from any thread: the
+     * update is ordered against {@link #dispatch(LogEvent)} and
+     * {@link #addSubscriber(LogSubscriber)} via {@link #replayLock}.
+     * </p>
+     *
+     * @param newCapacity the new replay capacity (must be positive)
+     * @throws IllegalArgumentException if {@code newCapacity} is not positive
+     */
+    public void setReplayCapacity(int newCapacity) {
+        if (newCapacity <= 0) {
+            throw new IllegalArgumentException("Replay capacity must be positive, got: " + newCapacity);
+        }
+        synchronized (replayLock) {
+            this.replayCapacity = newCapacity;
+            while (replayBuffer.size() > newCapacity) {
+                replayBuffer.removeFirst();
+            }
+        }
     }
 
     /** @return the number of events currently retained in the replay buffer */

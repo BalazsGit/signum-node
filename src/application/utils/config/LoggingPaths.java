@@ -1,5 +1,6 @@
 package application.utils.config;
 
+import application.module.node.profile.NodeProfile;
 import application.utils.io.PathUtils;
 
 import java.io.IOException;
@@ -83,7 +84,7 @@ public final class LoggingPaths {
     /** Classpath resource of the system L0 reference template. */
     public static final String SYSTEM_TEMPLATE_RESOURCE =
             ConfigPaths.CLASSPATH_PREFIX + ModuleIds.SYSTEM + "/" + ModuleIds.CATEGORY_LOGGING + "/"
-                    + SYSTEM_TEMPLATE_FILE_NAME;
+                    + NodeProfile.TEMPLATE_DIR + "/" + SYSTEM_TEMPLATE_FILE_NAME;
 
     /** Legacy (pre-consistent-layout) generated-global directory segment, for migration. */
     private static final String LEGACY_GLOBAL_RUNTIME_DIR = "logging-runtime";
@@ -209,36 +210,29 @@ public final class LoggingPaths {
     /**
      * Ensures the system logging layout exists (idempotent, startup bootstrap):
      * <ul>
-     *   <li>{@code conf/system/logging/default.properties} — auto-created from
-     *       the classpath seed when missing, NEVER overwritten (user-owned L1,
-     *       the same contract as the node L1);</li>
-     *   <li>{@code conf/system/logging/system-default.properties} — SHA-256
-     *       synced from the classpath reference template (read-only
+     *   <li>{@code conf/system/logging/template/system-default.properties} —
+     *       SHA-256 synced from the classpath reference template (read-only
      *       documentation, safe to overwrite).</li>
      * </ul>
+     * <p>
+     * In the two-layer architecture, the L1 user-owned default file
+     * ({@code default.properties}) no longer exists.
      *
      * @param confRoot the conf root (relative, e.g. {@code conf})
-     * @return true when both files exist after the call (even when nothing
-     *         had to be created); false when a classpath resource is missing
-     *         or unwritable (the layout then degrades gracefully — the layers
-     *         simply resolve as empty)
+     * @return true when the template file exists after the call (even when
+     *         nothing had to be created); false when a classpath resource is
+     *         missing or unwritable (the layout then degrades gracefully —
+     *         the layers simply resolve as empty)
      */
     public static boolean ensureSystemLoggingFiles(String confRoot) {
-        boolean ok = true;
-        if (LoggingPaths.class.getResource(SYSTEM_L1_RESOURCE) == null) {
-            ok = false;
-        } else {
-            PropertiesProfileLoader.ensureUserDefaultFile(confRoot, ModuleIds.SYSTEM,
-                    ModuleIds.CATEGORY_LOGGING,
-                    ReservedNames.DEFAULT_PROFILE_NAME + ".properties", SYSTEM_L1_RESOURCE);
-        }
         if (LoggingPaths.class.getResource(SYSTEM_TEMPLATE_RESOURCE) == null) {
-            ok = false;
-        } else {
-            PropertiesProfileLoader.syncDefaultFileFromClasspath(confRoot, ModuleIds.SYSTEM,
-                    ModuleIds.CATEGORY_LOGGING, SYSTEM_TEMPLATE_FILE_NAME, SYSTEM_TEMPLATE_RESOURCE);
+            return false;
         }
-        return ok;
+        PropertiesProfileLoader.syncDefaultFileFromClasspath(confRoot, ModuleIds.SYSTEM,
+                ModuleIds.CATEGORY_LOGGING,
+                NodeProfile.TEMPLATE_DIR + "/" + SYSTEM_TEMPLATE_FILE_NAME,
+                SYSTEM_TEMPLATE_RESOURCE);
+        return true;
     }
 
     // ── private helpers ────────────────────────────────────────────────

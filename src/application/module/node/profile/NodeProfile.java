@@ -51,23 +51,19 @@ public class NodeProfile implements PropertiesProfileEntity {
     /**
      * Default profile file name (follows {module}-default.properties convention).
      * <p>
-     * This is the <b>reference-only L0 documentation template</b> (SHA-256
-     * synced from classpath resources, never read at runtime). The runtime L1
-     * layer is {@link #DEFAULT_L1_FILENAME}.
+     * This is the <b>reference-only L0 documentation template</b>, now located
+     * in the {@code template/} subdirectory (outside profile discovery scope).
+     * SHA-256 synced from classpath resources, never read at runtime.
      */
     static final String DEFAULT_PROFILE_FILENAME = MODULE_ID + "-default.properties";
 
     /**
-     * The user-editable L1 layer file name:
-     * {@code conf/node/profiles/default.properties}.
-     * <p>
-     * Its ACTIVE lines override the hardcoded L0 defaults for EVERY node
-     * profile. The file is user-owned: it is auto-created at first start
-     * ({@link NodeProfileRepository#ensureUserDefaultFiles}) and is never
-     * overwritten by the classpath sync.
+     * The template subdirectory name where reference-only L0 documentation
+     * templates are stored. Files in this subdirectory are excluded from
+     * profile discovery because {@code PropertiesProfileLoader.discoverProfiles}
+     * only lists regular files (not directories).
      */
-    public static final String DEFAULT_L1_FILENAME =
-            ReservedNames.DEFAULT_PROFILE_NAME + ".properties";
+    public static final String TEMPLATE_DIR = "template";
 
     /** Default logging file name. */
     static final String DEFAULT_LOGGING_FILENAME =

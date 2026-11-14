@@ -39,8 +39,7 @@ composition is `EffectiveProfileResolver` + `LoggingProfileManager`.
 ### Per-Node File Log
 
 Every running node writes its own log file via the isolated Log4j2 node
-context's RollingFile appender (and the legacy `ProfileFileAppender` bus
-subscriber):
+context's RollingFile appender:
 
 ```
 {node.fileLog.dir}/{profileName}.log    (default: logs/node/{profileName}.log)

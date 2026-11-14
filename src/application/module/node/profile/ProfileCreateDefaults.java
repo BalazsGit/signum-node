@@ -74,6 +74,12 @@ public final class ProfileCreateDefaults {
                     || dbUrl == null || !dbUrl.startsWith("jdbc:sqlite:")) {
                 return;
             }
+            SqliteDatabasePaths.SqliteUrlParts parts = SqliteDatabasePaths.splitUrl(dbUrl);
+            if (parts == null || !SqliteDatabasePaths.isDbFile(parts.fileName())) {
+                logger.warn("Skipping SQLite database profile '{}' because its URL must name a .db file",
+                        profileName);
+                return;
+            }
             SQLiteProfile profile = new SQLiteProfile(profileName.trim());
             profile.getConfiguration().put(SQLiteProfile.CFG_URL, dbUrl);
             profile.saveToProfileJson();
@@ -87,6 +93,23 @@ public final class ProfileCreateDefaults {
     /** Fully-qualified testnet network-parameters class ({@code signum.net.TestnetNetwork}). */
     public static final String TESTNET_NETWORK_CLASS = "signum.net.TestnetNetwork";
 
+    /** Fully-qualified mock network-parameters class ({@code signum.net.MockNetwork}). */
+    public static final String MOCKNET_NETWORK_CLASS = "signum.net.MockNetwork";
+
+    /**
+     * Maps the network selection to {@code node.network} (see
+     * {@link Network#getNetworkParametersClass()}).
+     */
+    public static Properties applyNetwork(Properties props, Network network) {
+        String clazz = (network == null ? Network.MAINNET : network).getNetworkParametersClass();
+        if (clazz != null) {
+            props.setProperty(Props.NETWORK_PARAMETERS.getName(), clazz);
+        } else {
+            props.remove(Props.NETWORK_PARAMETERS.getName());
+        }
+        return props;
+    }
+
     /**
      * Maps the network selection to {@code node.network} — the fully-qualified
      * {@code NetworkParameters} class name loaded via reflection at node start.
@@ -98,12 +121,7 @@ public final class ProfileCreateDefaults {
      * </p>
      */
     public static Properties applyNetwork(Properties props, boolean testnet) {
-        if (testnet) {
-            props.setProperty(Props.NETWORK_PARAMETERS.getName(), TESTNET_NETWORK_CLASS);
-        } else {
-            props.remove(Props.NETWORK_PARAMETERS.getName());
-        }
-        return props;
+        return applyNetwork(props, testnet ? Network.TESTNET : Network.MAINNET);
     }
 
     /** Assigns a per-profile (file-based) SQLite database — independently runnable out of the box. */

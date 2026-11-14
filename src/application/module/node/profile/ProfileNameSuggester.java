@@ -35,7 +35,26 @@ public final class ProfileNameSuggester {
      * @return the base name
      */
     public static String baseName(boolean testnet, String dbEngine, boolean apiPortNonDefault, int apiPort) {
-        StringBuilder sb = new StringBuilder(testnet ? "testnet" : "mainnet");
+        return baseName(testnet ? "testnet" : "mainnet", dbEngine, apiPortNonDefault, apiPort);
+    }
+
+    /**
+     * Builds a base profile name from the selected configuration (network-name
+     * form, used by the setup wizard whose first step decides the network):
+     * {@code <network>[-mariadb|-postgres][-<apiPort>]}, where {@code <network>}
+     * is the lowercase network name ({@code mainnet} / {@code testnet} /
+     * {@code mocknet}).
+     *
+     * @param network            the lowercase network name (null/blank → {@code mainnet})
+     * @param dbEngine           the {@code DB.Engine} property value (e.g. {@code mariaDb},
+     *                           {@code postgresql}); null/empty/SQLite → no engine suffix
+     * @param apiPortNonDefault  true → append {@code -<apiPort>}
+     * @param apiPort            the API port to append when {@code apiPortNonDefault}
+     * @return the base name
+     */
+    public static String baseName(String network, String dbEngine, boolean apiPortNonDefault, int apiPort) {
+        String net = network == null || network.trim().isEmpty() ? "mainnet" : network.trim();
+        StringBuilder sb = new StringBuilder(net);
         String suffix = engineSuffix(dbEngine);
         if (suffix != null && !suffix.isEmpty()) {
             sb.append('-').append(suffix);

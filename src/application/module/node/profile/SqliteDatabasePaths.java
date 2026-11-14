@@ -2,6 +2,7 @@ package application.module.node.profile;
 
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -20,7 +21,9 @@ import java.util.Locale;
  *   <li>the database-profile name is the <b>last folder</b> of a convention path (never a
  *       free input of the configuration UI);</li>
  *   <li>the canonical URL form is {@code jdbc:sqlite:file:<dir>/<file>} (the {@code file:}
- *       prefix and a {@code ?query} suffix are tolerated on input and dropped on output);</li>
+ *       prefix and a {@code ?query} suffix are tolerated on input and dropped on output); the
+ *       final non-empty path segment is the configured database file, while a directory-only URL
+ *       ends with {@code /}; configured database files must have the {@code .db} extension;</li>
  *   <li>discovered database files are the {@code *.db} regular files of a directory.</li>
  * </ul>
  * <p>
@@ -102,7 +105,7 @@ public final class SqliteDatabasePaths {
 
     /**
      * A SQLite JDBC URL split into the directory the database file lives in and the file
-     * name itself (the file name is {@code ""} for a directory-only URL).
+     * name itself (the file name is {@code ""} for a directory-only URL ending in {@code /}).
      */
     public record SqliteUrlParts(Path dir, String fileName) {
     }
@@ -112,12 +115,12 @@ public final class SqliteDatabasePaths {
      * {@code file:} prefix and a {@code ?query} suffix (both dropped); a non-SQLite URL
      * or a malformed input yields {@code null}.
      * <p>
-     * The last path segment is a database file only when it is a {@code *.db} file — so a
-     * directory-only URL (optionally with a query suffix, e.g.
-     * {@code jdbc:sqlite:file:./database/SQLite/mainnet?mode=ro}) yields the whole directory
-     * and an empty file name. A URL without a path separator (e.g.
-     * {@code jdbc:sqlite:signum.sqlite.db}) is a {@code *.db} file in the working directory:
-     * {@code dir = "."}.
+     * The final non-empty path segment is the configured database file; callers validate its
+     * extension with {@link #isDbFile(String)}. A directory-only URL is identified by its
+     * trailing slash (optionally before a query
+     * suffix), e.g. {@code jdbc:sqlite:file:./database/SQLite/mainnet/?mode=ro}. A URL without
+     * a path separator (e.g. {@code jdbc:sqlite:signum.sqlite}) is a file in the working
+     * directory: {@code dir = "."}.
      * </p>
      */
     public static SqliteUrlParts splitUrl(String url) {
@@ -136,30 +139,34 @@ public final class SqliteDatabasePaths {
         int idx = normalized.lastIndexOf('/');
         String dir;
         String file;
-        if (idx < 0) {
+        if (normalized.isEmpty() || normalized.endsWith("/")) {
+            // A trailing slash is the unambiguous directory-only form.
+            dir = normalized.endsWith("/") ? normalized.substring(0, normalized.length() - 1) : normalized;
+            file = "";
+        } else if (idx < 0) {
             // No separator: a file in the working directory.
             dir = ".";
             file = normalized;
-        } else if (isDbFile(normalized.substring(idx + 1))) {
-            // The last segment names a database file: split it off the directory.
+        } else {
+            // Keep the configured file name intact so callers can report invalid extensions.
             dir = normalized.substring(0, idx);
             file = normalized.substring(idx + 1);
-        } else {
-            // A directory-only URL (or a non-db file name): everything is the directory.
-            dir = normalized;
-            file = "";
         }
         if (dir.isEmpty()) {
-            dir = ".";
+            dir = idx == 0 ? "/" : ".";
         }
-        return new SqliteUrlParts(Path.of(dir), file);
+        try {
+            return new SqliteUrlParts(Path.of(dir), file);
+        } catch (InvalidPathException e) {
+            return null;
+        }
     }
 
     /**
      * Composes the canonical SQLite JDBC URL for the given directory and database file:
      * {@code jdbc:sqlite:file:<dir>/<file>}. A relative directory is rendered
      * {@code ./}-prefixed (an absolute one is kept as-is); an empty/blank file name yields
-     * the directory-only form ({@code jdbc:sqlite:file:<dir>}).
+     * the trailing-slash directory-only form ({@code jdbc:sqlite:file:<dir>/}).
      */
     public static String composeUrl(Path dir, String fileName) {
         String dirStr = normalize(dir.toString());
@@ -171,7 +178,7 @@ public final class SqliteDatabasePaths {
         }
         String file = fileName == null ? "" : fileName.trim();
         return file.isEmpty()
-                ? "jdbc:sqlite:file:" + dirStr
+                ? "jdbc:sqlite:file:" + dirStr + "/"
                 : "jdbc:sqlite:file:" + dirStr + "/" + file;
     }
 
@@ -198,14 +205,22 @@ public final class SqliteDatabasePaths {
         return names;
     }
 
-    /** Whether the file name is a discoverable database file ({@code *.db}, case-insensitive). */
+    /**
+     * Whether the value is a valid SQLite database file name
+     * ({@code *.db}, case-insensitive).
+     */
     public static boolean isDbFile(String fileName) {
-        return fileName != null && fileName.toLowerCase(Locale.ROOT).endsWith(DB_FILE_EXTENSION);
+        return fileName != null
+                && !fileName.isBlank()
+                && fileName.indexOf('/') < 0
+                && fileName.indexOf('\\') < 0
+                && fileName.toLowerCase(Locale.ROOT).endsWith(DB_FILE_EXTENSION);
     }
 
     /**
      * Whether the given SQLite JDBC URL points at a database of the named database profile
-     * (a file inside {@code ./database/SQLite/<profile>}, or the profile directory itself).
+     * (a file inside {@code ./database/SQLite/<profile>}, or the profile directory itself
+     * when the URL has the directory-only trailing slash form).
      * Non-SQLite or malformed URLs match nothing.
      */
     public static boolean matchesProfile(String profileName, String dbUrl) {

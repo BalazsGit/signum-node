@@ -318,11 +318,11 @@ JVM-szintű kontextusa. A node-mintára kap **profile-UI-t**, de **nem több pro
 | Gomb | Hol | Default | Profile-override? |
 |---|---|---|---|
 | Node fájl-log (Log4j2 RollingFile `nodefile`) | logging-profil `node.fileLog.enable/dir/level/size/max` → generált fájl | `true / logs/node / INFO / 10MB / 5` | ✅ L0→L1→L2 |
-| Per-node busz-fájl (`ProfileFileAppender`, `{dir}/{profile}.log`) | **node-profil** `Props.FILE_LOG_ENABLE/DIR/LEVEL/LIMIT/COUNT` (a `Signum.attachProfileFileAppender`) | (node-profil defaultok) | ✅ (de **külön** forrás, lásd 6.3) |
+| Per-node busz-fájl (`ProfileFileAppender`) | ~~`Props.FILE_LOG_*`~~ — **eltávolítva (F4.4)**: duplikált írás ugyanarra a `{node.fileLog.dir}/{profile}.log`-ra | — | ✅ (SSOT: Log4j2 `nodefile`) |
 | GUI konzol buffer (karakter) | logging-profil `node.gui.consoleLogSize` (fogyasztó: `LoggerConfigurationPanel`) | `100000` | ✅ |
 | GUI max sor (a konzol memóriája) | **user-JSON** `ConsoleSettings.maxConsoleLines` (nem logging-profil) | `1000` | ❌ (user-preferencia) |
-| SystemLogger ring buffer (replay) | **hardcoded** `SystemLogger.BUFFER_SIZE` | `500` | ❌ |
-| ProfileLogger replay buffer | **hardcoded** `ProfileLogger.DEFAULT_REPLAY_CAPACITY` (3-arg ctor) | `500` | ❌ |
+| SystemLogger ring buffer (replay) | `SystemLogger.BUFFER_SIZE` = `ConsoleLimits.DEFAULT_SYSTEM_MAX_LINES` (`console.maxLines` L0) | `1500` | ⚠️ SSOT-aligned (compile-time, L0 default) |
+| ProfileLogger replay buffer | `DEFAULT_REPLAY_CAPACITY` (500 fallback) + node **live-aligned** to `node.console.maxLines` (via `setReplayCapacity`) | `500` → node.console.maxLines | ✅ (node live; 500 fallback) |
 | Bootstrap buffer (indulási sorok) | **hardcoded** `BootstrapLogBuffer.DEFAULT_CAPACITY` | `500` | ❌ |
 
 Tehát a te említésed: a **10MB-os korlát és a fájl-szám már** profile-látható
@@ -358,6 +358,11 @@ Ez duplikáció: két fájl-log mechanizmus, két config-forrás. **Javaslat:** 
 konszolidálni – pl. a **logging-profil** `node.fileLog.*` legyen az egyetlen SSOT, a
 `ProfileFileAppender` a logging-profil effective értékeit vegye; a node-profil `Props.FILE_LOG_*`
 legyen csak átíró/kompat. Ez tisztítja a „fájl-log hol beállítható?" kérdést.
+
+> **Státusz (F4.4): KÉSZ.** A `ProfileFileAppender` (busz-szintű, `Props.FILE_LOG_*`) **eltávolítva**:
+> a node-fájl-log-ot most kizárólag a Log4j2 `nodefile` appender írja (`node.fileLog.*` az SSOT).
+> A `Props.FILE_LOG_*` `@Deprecated` (config-kompat), a `ProfileFileAppender` + tesztje törölve,
+> a `Signum`-ból a bekötés (attach/detach/field) kivéve.
 
 ### 6.4. A GUI-konzol buffer/maxLines **csak a GUI-konzolt** érinti (a 6-os pont)
 
@@ -397,6 +402,23 @@ pont azért zavaros, mert nehéz utólag meghatározni, *mi és hol* korlátoz:
    (pl. buffer = `maxLines`, char-cap = `maxLines × ~80`), hogy **ne 5 helyen** állítható legyen ugyanaz.
 5. Eredmény: **1 helyen** (a logging-profile-ban) van definiálva, hogy mennyi sor jelenjen meg a
    konzolon; a GUI **nem korlátoz** külön `maxConsoleLines`-szal → nincs kétforrású inkonzisztencia.
+
+### 6.6 Státusz (F4 follow-up: replay-igazítás)
+
+- **Replay-buffer — KÉSZ.** A busz-replay most a konzol-maxLines SSOT-hoz igazodik:
+  - `SystemLogger.BUFFER_SIZE` = `ConsoleLimits.DEFAULT_SYSTEM_MAX_LINES` (`console.maxLines` L0 = 1500).
+    Ez compile-time konstans (a singleton a profil-réteg betöltése előtt jön létre), tehát az L0
+    defaultot követi, nem egy live L1/L2 override-et.
+  - `ProfileLogger`: a `Signum` induláskor `setReplayCapacity(NodeLoggingContextApplier.resolveConsoleMaxLines(...))`
+    -lal igazítja a node-replay-t a feloldott `node.console.maxLines`-re (live-derived, L0→L1→L2).
+    A `DEFAULT_REPLAY_CAPACITY` (500) csak az általános fallback (node kívüli modulok).
+  - Tesztek: `ProfileLoggerTest.setReplayCapacity_*` + `systemLoggerBufferSize_isAlignedWithSystemConsoleDefault`.
+- **Char-cap (`consoleLogSize`) — levezetve, de NEM bekötve.** `ConsoleLimits.deriveCharCap(maxLines)`
+  megvan (maxLines × ~80), de a `node.gui.consoleLogSize` ma nem cap-ként érvényesül (a GUI a
+  sorszámot, nem a karaktercapot használja) → a bekötése alacsony érték, halogatott.
+- **Node-fájl-log SSOT (6.3) — KÉSZ.** A `ProfileFileAppender` (busz-szintű, `Props.FILE_LOG_*`)
+  eltávolítva; a node-fájl-log-ot kizárólag a Log4j2 `nodefile` appender írja (`node.fileLog.*` SSOT).
+  A `Props.FILE_LOG_*` `@Deprecated` (config-kompat), a `ProfileFileAppender` + tesztje törölve.
 
 > **Döntés (Q6):** (1) `console.maxLines` / `node.console.maxLines` **egy SSOT** a profile-ba + a GUI
 > onnan olvas (a JSON `maxConsoleLines` kiszorul); (2) `logging.buffer.*` kulcsok a busz-bufferhez
@@ -502,6 +524,16 @@ féli lib-okért megmarad.
    szemet törölve; a `default`/`node-default`/`node` baseline megmaradt). A **teszt-izoláció (F0b)**
    a ~26 hardkódolt `conf` root-ú GUI/node-teszt `@TempDir`-re költözése — külön, jól körülhatárolt
    követő-lépés (a `NodeLoggingConfigResolverTest` már izolált).
+    **F0b – teszt-izoláció (KÉSZ, 2026-10-31):** a 10 `Signum`-alapú GUI/node-teszt hardkódolt
+    `Paths.get("./conf")`-ja `@TempDir static java.nio.file.Path`-ra konvertálva (a `CONF` nevű mezőket
+    névvel) → a `Signum`-konstruktor `applyMinimal`/`resolveConsoleMaxLines`-e a temp-rootba ír, nem a
+    valós `conf/`-be. Biztonság: a konstruktor védekező (L0-defaultok kódolva), `loadPropertiesForProfile`
+    üres rooton is L0-ra esik vissza (lásd `SignumLoadPropertiesForProfileTest`), a `startNode`-tesztek a
+    szinkron reservation/release-t tesztelik. **KIFÜGG** a `NodeConfigurationPanel`/`JdbcConfigurationPanel`
+    ~14 tesztről: azok `confFolder` paramétere vestigial (a tényleges I/O `ConfigurationUtils` →
+    `ConfigPaths.RUNTIME_CONF_ROOT` SSOT-ot használ), így `@TempDir` paraméter-csere NEM izolálná —
+    azok elkülönítése F0c (root-configurable `ConfigurationUtils`) keretében kerül sorra.
+
 
 ### F1 – Szintnevek egységesítése log4j2-re (Q4) · alacsony · ✅ KÉSZ
 1. L0-defaultok JUL→log4j2 (Node/Database/Browser + legacy `LoggerProfile`).
@@ -566,6 +598,29 @@ féli lib-okért megmarad.
    `ProfileLogger.forwardToSystem` → System Console).
    - **Csak** ha a F1–F4 stabil; a C opcionális kényelmi routing.
 
+> **✅ F5 KÉSZ (2026-10-31).** A 4 **per-node nézet**-komponens (`NodeConsolePanel`, `NodeProfilePanel`,
+> `NodeToolbar`, `NodeConfigurationPanel`) mostantól a birtokolt node `NodeLoggers`-én logol.
+> - **Mechanika:** minden komponensben egy null-safe `nodeContextLogger()` helper:
+>   `signum != null ? signum.loggers().forClass(<Osztály>.class) : LogManager.getLogger(<Osztály>.class)`,
+>   return-típus **`org.apache.logging.log4j.Logger`**. Fontos: a `NodeLoggers.forClass()` **log4j-Logger-t**
+>   ad (nem SLF4J-t!), ezért a return + a fallback is log4j (a `signum == null` = late binding / headless
+>   esetben a **global** log4j-logger, ami a korábbi SLF4J `LOGGER`-rel ugyanazt az allogger-t adja).
+> - **Dead code eltávolítva:** a korábbi class-based (SLF4J) `LOGGER` mező + az `org.slf4j` importok; minden
+>   `LOGGER.*` hívás `nodeContextLogger().*`-ra repontolva (NodeConsolePanel 74, NodeProfilePanel 24,
+>   NodeToolbar 4, NodeConfigurationPanel 41 helyszín).
+> - **Ütközés-mentes:** a már meglévő, **más** `ProfileLogger nodeLogger()` (P8/F4 busz-routing) érintetlen
+>   maradt — ezért a new helper a különálló `nodeContextLogger()` nevet kapta (nem `nodeLogger()`).
+> - **Headless-safe + system-forward:** a global fallback és a node-kontextus → System Console forward
+>   változatlan.
+> - **Static kontextus-folt (javítva):** a vak `LOGGER.` → `nodeContextLogger().` repontolás a
+>   `NodeConsolePanel` 7 **static** helyszínén (egy static font-dump metódus + a static
+>   `TextAreaOutputStream.maybeScrollToEnd`) nem fordult le — az instance `nodeContextLogger()`
+>   static kontextusból nem hívható. Javítás: `NodeConsolePanel`-be `staticLogger()` static accessor
+>   (global log4j logger; static kontextusban nincs instance → nincs owned node), a 7 static helyszín ráirányítva.
+> - **✅ Build VERIFIKÁLT (2026-10-31):** a projekt **Gradle** (nem Maven) — `JAVA_HOME`-ban Zulu JDK 25,
+>   a Gradle 9.7.1 wrapper + 436 MB dep-cache már letöltve. `gradlew compileJava` ✅, `compileTestJava` ✅,
+>   teljes `gradlew test` ✅ (**2447 passed, 0 failed**, ~3 perc).
+
 ### Nincs kódmódosítás (csak dokumentáció / magyarázat)
 - **Q2** (forrás-gát vs display-szűrő) – a §2.3 nyomatékosítja (két külön mechanizmus); L1 marad
   forrás-gát (ha „system = teljes nyilvántartás" kellene, az külön tervezési döntés).
@@ -590,8 +645,25 @@ féli lib-okért megmarad.
 **Implementációs sorrend:** `F0 → F1 → F2 → F3 → F4 → (F5, opcionális)`. Minden fázis build + teszttel,
 visszavonható.
 
-**Következő lépés:** **F1 / F2 / F3** ✅ KÉSZ, **F0** + **F4 (kernel)** ✅ KÉSZ (build + teszt):
-mindkét konzol (system + node) a `console.maxLines`/`node.console.maxLines` SSOT-t olvassa, a JSON
-`maxConsoleLines` deprecated. F4 opcionális follow-up: char-cap/replay levezetés + node-fájl-log SSOT.
-Ezután az opcionális **F5**. Ha valamelyik döntésen (D1–D7) módosítani szeretnél, szólj – a terv
-azonnal igazodzik.
+**Következő lépés:** **F0–F5 mind ✅ KÉSZ + build VERIFIKÁLT.** F0 (teszt-elválasztás `@TempDir`-re),
+F1–F3 (konzol-limits SSOT, build + teszt), F4 (kernel + node-fájl-log SSOT), F5 (node.gui hibrid routing
+→ `NodeLoggers`). A projekt **Gradle** (nem Maven): `gradlew compileJava` / `compileTestJava` / `test`
+mind zöld (JDK 25 + Gradle 9.7.1; **2447 passed, 0 failed**).
+
+**Elavult (pre-existing) tesztek — a F0-F4 (JUL→log4j2) migráció előzte meg őket; a `ae94d1adc` (F0-F4)
+commit a két tesztfájl utolsó módosítása UTÁN jött (2026-10-31), a „644 teszt, 0 failure" állítás e 3-ra
+nem vonatkozott.** Kezelve:
+- `ConfigurationUtilsLoadEffectiveLoggerProfileTest` (L0 `handlers`): a F0-F4 törölte a JUL L0-defaultot
+  (`handlers=ConsoleHandler`, `.level`, `ConsoleHandler.level/formatter`) a `LoggerProfile.applyInternalDefaults()`-ból
+  → az assert most a log4j2 L0-defaultot (`org.eclipse.jetty.level=OFF`) ellenőrzi (a „L0 marad érvényben,
+  ha nincs L1 fájl" szándék megőrzött).
+- `NodeLoggingPanelTest` (`handlers` sor null): a `handlers` L0-default törlésével a sor megszűnt → a teszt
+  egy másik non-level editable soron (`Log File Pattern`) végzi el ugyanazt az „editable combo tooltip-t
+  L&F-pass után" ellenőrzést.
+- `NodeLoggingPanelTest` (File Level classic): **NYITOTT döntés** — a "File Level" mező JUL default-t visel
+  (`FINE`, kulcs `java.util.logging.FileHandler.level`), ami a F0-F4 log4j2 `LOG_LEVELS` listájában
+  (`ERROR/WARN/INFO/DEBUG/TRACE/OFF`) nincs, ezért `makeEditor()` most editable-re teszi. A
+  `TODO(open-decision)` komment jelöli; a File Handler-szekció log4j2-migrálása / default-változtatása /
+  eltávolítása külön döntés.
+
+Ha valamelyik döntésen (D1–D7) módosítani szeretnél, szólj – a terv azonnal igazodzik.

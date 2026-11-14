@@ -66,7 +66,6 @@ import application.module.node.web.api.http.common.APITransactionManager;
 import application.module.node.web.api.http.common.APITransactionManagerImpl;
 import application.module.node.web.server.WebServerContext;
 import application.module.node.web.server.WebServerImpl;
-import application.utils.logging.ProfileFileAppender;
 import application.utils.logging.ProfileLogger;
 import application.module.logging.appender.ProfileConsoleAppender;
 import application.module.logging.context.NodeLoggingContext;
@@ -275,11 +274,6 @@ public final class Signum {
 
     // ── Logging (per-node instance) ──
     private ProfileLogger profileLogger;
-    /**
-     * The per-node file log appender (created in doInitialize, removed in doShutdown /
-     * dispose): writes this node's INFO+ log events to {node.fileLog.dir}/{profile}.log.
-     */
-    private volatile ProfileFileAppender profileFileAppender;
 
     // ── Lifecycle flags ──
     private final AtomicBoolean contextStarted = new AtomicBoolean(false);
@@ -353,6 +347,17 @@ public final class Signum {
         // path to the System Console (no duplication — node events live only in the
         // node's isolated context).
         this.profileLogger = application.utils.logging.NodeLoggerRegistry.getOrCreate(ModuleIds.NODE, profile.getName());
+
+        // F4 (console SSOT): align the replay buffer with the effective console line
+        // cap, so a late-attaching node console tab replays the same history the
+        // console can display (instead of the fixed DEFAULT_REPLAY_CAPACITY).
+        // Best-effort: on any failure the default capacity is kept.
+        try {
+            this.profileLogger.setReplayCapacity(
+                    NodeLoggingContextApplier.resolveConsoleMaxLines(confFolder, profile.getName()));
+        } catch (Throwable t) {
+            // keep the default replay capacity
+        }
 
         // ── Step 2: the isolated node LoggerContext, minimal config first ──
         // Two-phase start (plan §6.3): the context boots with the L0-only minimal
@@ -560,7 +565,6 @@ public final class Signum {
     public synchronized void dispose() {
         ProfileLogger pl = this.profileLogger;
         if (pl != null) {
-            detachProfileFileAppender();
             pl.close();
             if (this.profile != null) {
                 application.utils.logging.NodeLoggerRegistry.unregister(ModuleIds.NODE, this.profile.getName());
@@ -950,65 +954,6 @@ public final class Signum {
         return profileLogger;
     }
 
-    /**
-     * Attaches the per-node file log appender (the runtime half of per-node file
-     * logging): events at/above the configured {@code node.fileLog.level} of this
-     * node's ProfileLogger are written to {@code {node.fileLog.dir}/{profile}.log}
-     * for the lifetime of the node run.
-     * <p>
-     * Idempotent/restart-safe: an appender from a previous run is removed first,
-     * so a stop/start cycle within the same JVM never duplicates the file writes.
-     * Fail-soft: any problem (unwritable directory, bad config value) is logged
-     * once and the node keeps running without a file log.
-     * </p>
-     */
-    private void attachProfileFileAppender() {
-        detachProfileFileAppender(); // restart guard — never double-attach
-        try {
-            if (profileLogger == null || !propertyService.getBoolean(Props.FILE_LOG_ENABLE)) {
-                return;
-            }
-            ProfileFileAppender appender = new ProfileFileAppender(
-                    profile.getName(),
-                    application.utils.io.PathUtils.resolvePath(propertyService.getString(Props.FILE_LOG_DIR)),
-                    ProfileFileAppender.parseLevel(propertyService.getString(Props.FILE_LOG_LEVEL)),
-                    propertyService.getInt(Props.FILE_LOG_LIMIT),
-                    propertyService.getInt(Props.FILE_LOG_COUNT));
-            if (!appender.isActive()) {
-                appender.dispose();
-                logger.warn("Per-node file log is inactive for profile '{}' (could not open the log file in '{}')",
-                        profile.getName(), propertyService.getString(Props.FILE_LOG_DIR));
-                return;
-            }
-            profileLogger.addSubscriber(appender);
-            this.profileFileAppender = appender;
-            logger.info("Per-node file log attached for profile '{}': {} (level {}, {} bytes x {} rotations)",
-                    profile.getName(), appender.getFile().toAbsolutePath(),
-                    propertyService.getString(Props.FILE_LOG_LEVEL),
-                    propertyService.getInt(Props.FILE_LOG_LIMIT), propertyService.getInt(Props.FILE_LOG_COUNT));
-        } catch (Throwable t) {
-            logger.warn("Failed to attach the per-node file log appender: {}", t.getMessage());
-        }
-    }
-
-    /**
-     * Removes and closes the per-node file log appender (idempotent). Called from
-     * doShutdown (stop) and dispose (permanent removal); the next doInitialize
-     * attaches a fresh one.
-     */
-    private void detachProfileFileAppender() {
-        ProfileFileAppender appender = this.profileFileAppender;
-        if (appender == null) {
-            return;
-        }
-        this.profileFileAppender = null;
-        ProfileLogger pl = this.profileLogger;
-        if (pl != null) {
-            pl.removeSubscriber(appender);
-        }
-        appender.dispose(); // idempotent (removeSubscriber already disposed it)
-    }
-
     // =========================================================================
     // Profile management
     // =========================================================================
@@ -1254,11 +1199,9 @@ public final class Signum {
         // single level gate for node-context events, and the legacy (JUL-routed)
         // events stay gated by their own JUL levels.
 
-        // ── Step 1.6: attach the per-node file log appender (per-node file logging) ──
-        // Writes this node's log events at/above the configured level to
-        // {node.fileLog.dir}/{profileName}.log for the lifetime of the node run.
-        // Detached again in doShutdown / dispose. Never breaks node startup.
-        attachProfileFileAppender();
+        // ── Step 1.6 (F4.4): REMOVED — the per-node file log is written by the isolated
+        // Log4j2 node context's RollingFile appender (node.fileLog.*); the redundant
+        // bus-level ProfileFileAppender (a duplicate write to the same file) is gone.
 
         // ── Step 1.7: full apply of the isolated node LoggerContext config (P2.3) ──
         // L0+L1+L2 resolve -> generated-file write -> reconfigure of the SAME
@@ -1618,11 +1561,6 @@ public final class Signum {
     private void doShutdown() {
         String profileName = this.profile != null ? this.profile.getName() : "unknown";
         try {
-            // Stop the per-node file log appender first: no file writes happen from
-            // this point. The ProfileLogger itself stays alive (restart-friendly);
-            // the appender is re-attached on the next doInitialize.
-            detachProfileFileAppender();
-
             if (this.webServer != null) {
                 try {
                     this.webServer.shutdown();

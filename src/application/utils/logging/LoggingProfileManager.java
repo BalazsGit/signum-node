@@ -61,11 +61,12 @@ public final class LoggingProfileManager {
     private static final Logger LOGGER = LoggerFactory.getLogger(LoggingProfileManager.class);
 
     /**
-     * The user-editable L1 layer profile name. The L1 file lives in the
-     * NODE module's logging category
-     * ({@code {confFolder}/node/logging/default.properties}); it is the
-     * single L1 layer for every logging profile.
+     * The user-editable L1 layer profile name.
+     *
+     * @deprecated The L1 layer has been eliminated in the two-layer
+     *             architecture. Retained for backward-compatibility.
      */
+    @Deprecated(forRemoval = false)
     public static final String L1_BASE_PROFILE = application.utils.config.ReservedNames.DEFAULT_PROFILE_NAME;
 
     // ── Construction ──────────────────────────────────────────────────
@@ -104,10 +105,7 @@ public final class LoggingProfileManager {
             LOGGER.debug("Merged defaults for module '{}'", profile.getModuleId());
         }
 
-        // Step 2: the reserved default template (L1) overrides L0 for every profile.
-        loadL1DefaultTemplate(confFolder, result);
-
-        // Step 3: on-disk profile files (L2) override L0 and L1.
+        // Step 2: on-disk profile files (L2) override L0.
         for (ModuleLoggingProvider provider : providers) {
             ModuleLoggingProfile profile = provider.getProfile();
             Properties diskProps = provider.loadProfileFile(confFolder, profileName);
@@ -158,33 +156,6 @@ public final class LoggingProfileManager {
     }
 
     // ── Private helpers ───────────────────────────────────────────────
-
-    /**
-     * Loads the user-editable L1 layer from
-     * {@code {confFolder}/node/logging/default.properties}. Its active lines
-     * override the module built-in defaults (L0) for every profile; a missing
-     * or empty file simply leaves L0 in effect.
-     */
-    private void loadL1DefaultTemplate(String confFolder, Properties target) {
-        Path defaultFile = application.utils.io.PathUtils.resolvePath(confFolder)
-                .resolve(application.utils.config.ModuleIds.NODE)
-                .resolve(application.utils.config.ModuleIds.CATEGORY_LOGGING)
-                .resolve(L1_BASE_PROFILE + ".properties");
-
-        if (!java.nio.file.Files.exists(defaultFile)) {
-            LOGGER.debug("Logging default template (L1) not found: {}", defaultFile);
-            return;
-        }
-
-        try (FileInputStream is = new FileInputStream(defaultFile.toFile())) {
-            Properties base = new Properties();
-            base.load(is);
-            target.putAll(base);
-            LOGGER.info("Loaded {} logging default template (L1) entries from {}", base.size(), defaultFile);
-        } catch (IOException e) {
-            LOGGER.warn("Failed to load logging default template (L1) from {}: {}", defaultFile, e.getMessage());
-        }
-    }
 
     @Override
     public String toString() {

@@ -481,32 +481,41 @@ public final class NodeProfileRepository {
     // ── Default File Management ────────────────────────────────────────
 
     /**
-     * Synchronizes the default profile file from classpath resources to runtime conf/.
-     * Uses SHA-256 hash comparison to detect updates.
+     * Synchronizes the default profile file (L0 reference template) from
+     * classpath resources to the {@code template/} subdirectory in runtime
+     * conf/. Uses SHA-256 hash comparison to detect updates.
+     * <p>
+     * The template resides in {@code conf/node/profiles/template/} which is
+     * outside the profile discovery scope.
      */
     public static void syncDefaultProfileFile() {
         InputStream is = NodeProfile.class.getResourceAsStream(
-                "/conf/node/profiles/node-default.properties");
+                "/conf/node/profiles/template/node-default.properties");
         if (is != null) {
             PropertiesProfileLoader.syncDefaultFile(
                     NodeProfile.CONF_ROOT, NodeProfile.MODULE_ID, NodeProfile.CATEGORY,
-                    NodeProfile.DEFAULT_PROFILE_FILENAME, is);
+                    NodeProfile.TEMPLATE_DIR + "/" + NodeProfile.DEFAULT_PROFILE_FILENAME, is);
         } else {
             LOGGER.warn("Default profile resource not found on classpath");
         }
     }
 
     /**
-     * Synchronizes the default logging file from classpath resources to runtime conf/.
+     * Synchronizes the default logging file (L0 reference template) from
+     * classpath resources to the {@code template/} subdirectory in runtime
+     * conf/.
+     * <p>
+     * The template resides in {@code conf/node/logging/template/} which is
+     * outside the profile discovery scope.
      */
     public static void syncDefaultLoggingFile() {
         InputStream is = NodeProfile.class.getResourceAsStream(
-                "/conf/node/logging/logging-default.properties");
+                "/conf/node/logging/template/logging-default.properties");
         if (is != null) {
             PropertiesProfileLoader.syncDefaultFile(
                     NodeProfile.CONF_ROOT, NodeProfile.MODULE_ID,
                     PropertiesProfileLoader.DEFAULT_CATEGORY_LOGGING,
-                    NodeProfile.DEFAULT_LOGGING_FILENAME, is);
+                    NodeProfile.TEMPLATE_DIR + "/" + NodeProfile.DEFAULT_LOGGING_FILENAME, is);
         } else {
             LOGGER.warn("Default logging resource not found on classpath");
         }
@@ -523,8 +532,11 @@ public final class NodeProfileRepository {
     }
 
     /**
-     * Full initialization: sync defaults + ensure the user-owned L1 layer
-     * files + create placeholders if needed.
+     * Full initialization: sync defaults + create placeholders if needed.
+     * <p>
+     * In the two-layer architecture, the L1 user-owned default files no
+     * longer exist. Templates are synced into {@code template/} subdirectories
+     * (outside the profile discovery scope).
      * <p>
      * Call this once during application startup, before any profile loading occurs.
      */
@@ -532,32 +544,5 @@ public final class NodeProfileRepository {
         PropertiesProfileLoader.initializeModule(
                 NodeProfile.CONF_ROOT, NodeProfile.MODULE_ID, NodeProfile.RESERVED_PROFILE_NAMES,
                 ModuleIds.NODE, ModuleIds.CATEGORY_LOGGING);
-        ensureUserDefaultFiles();
-    }
-
-    /**
-     * Ensures the user-owned L1 layer files exist:
-     * {@code conf/node/profiles/default.properties} and
-     * {@code conf/node/logging/default.properties}.
-     * <p>
-     * Unlike the SHA-256-synced reference templates, these files are
-     * USER-OWNED: they are created from the classpath resource only when
-     * missing and are never overwritten afterwards — a user edit must
-     * survive application updates. A missing classpath resource is skipped
-     * gracefully. Deleting a file at runtime restores pure L0 defaults; the
-     * next start re-creates it.
-     */
-    public static void ensureUserDefaultFiles() {
-        PropertiesProfileLoader.ensureUserDefaultFile(
-                NodeProfile.CONF_ROOT, NodeProfile.MODULE_ID, NodeProfile.CATEGORY,
-                NodeProfile.DEFAULT_L1_FILENAME,
-                "/conf/" + NodeProfile.MODULE_ID + "/" + NodeProfile.CATEGORY + "/"
-                        + ReservedNames.DEFAULT_PROFILE_NAME + ".properties");
-        PropertiesProfileLoader.ensureUserDefaultFile(
-                NodeProfile.CONF_ROOT, NodeProfile.MODULE_ID,
-                PropertiesProfileLoader.DEFAULT_CATEGORY_LOGGING,
-                ReservedNames.DEFAULT_PROFILE_NAME + ".properties",
-                "/conf/" + NodeProfile.MODULE_ID + "/" + PropertiesProfileLoader.DEFAULT_CATEGORY_LOGGING
-                        + "/" + ReservedNames.DEFAULT_PROFILE_NAME + ".properties");
     }
 }
