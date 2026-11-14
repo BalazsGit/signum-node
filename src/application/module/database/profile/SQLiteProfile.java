@@ -7,6 +7,7 @@ import com.google.gson.JsonParser;
 
 import application.module.database.gui.DatabaseConfigurationPanel;
 import application.module.database.utils.DatabaseConfigurationUtils;
+import application.module.node.profile.ProfileCreateDefaults;
 import application.utils.io.PathUtils;
 
 import org.slf4j.Logger;
@@ -32,6 +33,17 @@ public class SQLiteProfile {
     public static final String CFG_JOURNAL_MODE = "DB.SqliteJournalMode";
     public static final String CFG_CACHE_SIZE = "DB.SqliteCacheSize";
 
+    /**
+     * The expandable list of database file names of a file-based profile (newline
+     * joined, see {@code DatabaseFileListEditor}). The FIRST entry is the active
+     * database: {@link #CFG_URL} is always composed from it. {@code DB.Url}
+     * remains the single canonical URL the node reads (see
+     * {@code Props.DB_URL}), so this list is purely the profile's editor-facing
+     * representation of its databases and the node's connection path is
+     * unaffected.
+     */
+    public static final String CFG_FILES = "DB.Files";
+
     private String profileName;
     private Path profileRoot;
     private final Map<String, String> configuration = new LinkedHashMap<>();
@@ -46,20 +58,8 @@ public class SQLiteProfile {
     }
 
     private void initDefaultConfiguration() {
-        // Database file is placed inside the profile's root directory:
-        // ../database/SQLite/{profileName}/signum.sqlite.db
-        // When no profile name is given, use the default "sqlite" folder.
-        String dbPath;
-        if (profileRoot != null) {
-            dbPath = profileRoot.resolve("signum.sqlite.db").toString();
-        } else {
-            // Fallback: default profile named "sqlite" under DATABASE_BASE_DIR/SQLite
-            Path fallbackRoot = PathUtils.resolvePath(DatabaseConfigurationUtils.DATABASE_BASE_DIR)
-                    .resolve(DatabaseConfigurationPanel.DatabaseEngine.SQLITE.toString())
-                    .resolve("sqlite");
-            dbPath = fallbackRoot.resolve("signum.sqlite.db").toString();
-        }
-        configuration.put(CFG_URL, "jdbc:sqlite:file:" + dbPath);
+        String databaseProfileName = profileName == null || profileName.isBlank() ? "sqlite" : profileName;
+        configuration.put(CFG_URL, ProfileCreateDefaults.sqliteDbUrl(databaseProfileName));
         configuration.put(CFG_JOURNAL_MODE, "WAL");
         configuration.put(CFG_CACHE_SIZE, "-131072");
     }

@@ -121,7 +121,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
 
         // New profile button
         newProfileBtn = new JButton("New Profile");
-        newProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.FILE_O, iconSize, iconColor));
+        ConfigurationUtils.styleNewProfileButton(newProfileBtn);
         ConfigurationUtils.fixComponentSize(newProfileBtn);
         newProfileBtn.addActionListener(e -> createNewProfile());
         toolbar.add(newProfileBtn);

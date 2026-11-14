@@ -87,11 +87,8 @@ public class MariaDBProfilePanel extends JPanel {
     private final Map<String, String> defaultValues = new HashMap<>();
     private Path profileRootPath;
     private Path enginePath;
-    private final Icon checkIcon = IconFontSwing.buildIcon(FontAwesome.CHECK_CIRCLE,
-            GuiConstants.getHelpIconSize(),
-            GuiColors.getApplied());
-    private final Icon errorIcon = IconFontSwing.buildIcon(FontAwesome.TIMES_CIRCLE, GuiConstants.getHelpIconSize(),
-            GuiColors.getContrastRed());
+    private final Icon checkIcon = DatabaseActionIcon.VALIDATION_SUCCESS.icon(GuiConstants.getHelpIconSize());
+    private final Icon errorIcon = DatabaseActionIcon.VALIDATION_ERROR.icon(GuiConstants.getHelpIconSize());
     private JButton downloadDatabaseBtn; // New: For download button
     private JButton removeDatabaseBtn; // New: For uninstall button
     // private JComboBox<String> profileComboBox;
@@ -507,12 +504,9 @@ public class MariaDBProfilePanel extends JPanel {
         JPanel btnRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
         btnRow.setOpaque(false);
 
-        startDbBtn = new JButton("Start Database",
-                IconFontSwing.buildIcon(FontAwesome.PLAY, GuiConstants.getHelpIconSize(), GuiColors.getApplied()));
-        stopDbBtn = new JButton("Stop Database",
-                IconFontSwing.buildIcon(FontAwesome.STOP, GuiConstants.getHelpIconSize(), GuiColors.getContrastRed()));
-        restartDbBtn = new JButton("Restart Database",
-                IconFontSwing.buildIcon(FontAwesome.REFRESH, GuiConstants.getHelpIconSize(), GuiColors.getSaved()));
+        startDbBtn = new JButton("Start Database", DatabaseActionIcon.START.icon(GuiConstants.getHelpIconSize()));
+        stopDbBtn = new JButton("Stop Database", DatabaseActionIcon.STOP.icon(GuiConstants.getHelpIconSize()));
+        restartDbBtn = new JButton("Restart Database", DatabaseActionIcon.RESTART.icon(GuiConstants.getHelpIconSize()));
 
         ConfigurationUtils.fixComponentSize(startDbBtn);
         ConfigurationUtils.fixComponentSize(stopDbBtn);
@@ -1505,12 +1499,9 @@ public class MariaDBProfilePanel extends JPanel {
         }
         updateProfileButtonsUI();
         if (startDbBtn != null) {
-            startDbBtn.setIcon(
-                    IconFontSwing.buildIcon(FontAwesome.PLAY, GuiConstants.getHelpIconSize(), GuiColors.getApplied()));
-            stopDbBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.STOP, GuiConstants.getHelpIconSize(),
-                    GuiColors.getContrastRed()));
-            restartDbBtn.setIcon(
-                    IconFontSwing.buildIcon(FontAwesome.REFRESH, GuiConstants.getHelpIconSize(), GuiColors.getSaved()));
+            startDbBtn.setIcon(DatabaseActionIcon.START.icon(GuiConstants.getHelpIconSize()));
+            stopDbBtn.setIcon(DatabaseActionIcon.STOP.icon(GuiConstants.getHelpIconSize()));
+            restartDbBtn.setIcon(DatabaseActionIcon.RESTART.icon(GuiConstants.getHelpIconSize()));
         }
     }
 

@@ -20,8 +20,6 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import jiconfont.icons.font_awesome.FontAwesome;
-import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
 
 import javax.swing.*;
@@ -192,11 +190,8 @@ public class DatabaseConfigurationPanel extends JPanel {
     private final Map<String, String> helpTexts = new HashMap<>();
     private final Map<String, String> defaultValues = new HashMap<>();
     private Path activeProfilePath;
-    private final Icon checkIcon = IconFontSwing.buildIcon(FontAwesome.CHECK_CIRCLE,
-            GuiConstants.getHelpIconSize(),
-            GuiColors.getApplied());
-    private final Icon errorIcon = IconFontSwing.buildIcon(FontAwesome.TIMES_CIRCLE, GuiConstants.getHelpIconSize(),
-            GuiColors.getContrastRed());
+    private final Icon checkIcon = DatabaseActionIcon.VALIDATION_SUCCESS.icon(GuiConstants.getHelpIconSize());
+    private final Icon errorIcon = DatabaseActionIcon.VALIDATION_ERROR.icon(GuiConstants.getHelpIconSize());
     private JComboBox<String> versionComboBox; // New: For portable versions
     private JButton downloadDatabaseBtn; // New: For download button
     private JComboBox<DatabaseEngine> engineComboBox;
