@@ -157,4 +157,27 @@ class ProfileConfigTest {
         assertTrue(Files.exists(legacy));
         assertTrue(Files.readString(legacy).contains("futureOption"));
     }
+
+    @Test
+    @DisplayName("P8/F3: an unchanged file is served from the shared raw cache (no redundant read); a change invalidates it")
+    void p8F3_sharedRawCache_reuseThenInvalidate() throws IOException {
+        Path nodeDir = tempDir.resolve("node");
+        Files.createDirectories(nodeDir);
+        Path profilesJson = nodeDir.resolve("profiles.json");
+        Files.writeString(profilesJson,
+                "{\"appliedProfile\":\"v1\",\"profiles\":{\"p1\":{}}}");
+
+        assertEquals("v1", new ProfileConfig(profilesJson).load().getAppliedProfile());
+
+        // A second instance (the GUI creates many) with the SAME unchanged file observes
+        // the same content, served from the shared (path, mtime, size) cache.
+        assertEquals("v1", new ProfileConfig(profilesJson).load().getAppliedProfile(),
+                "an unchanged file must be served from the shared raw cache");
+
+        // Mutating the file on disk (size + mtime change) must invalidate the cache.
+        Files.writeString(profilesJson,
+                "{\"appliedProfile\":\"v2\",\"profiles\":{\"p1\":{},\"p2\":{}}}");
+        assertEquals("v2", new ProfileConfig(profilesJson).load().getAppliedProfile(),
+                "a changed file must invalidate the shared raw cache");
+    }
 }

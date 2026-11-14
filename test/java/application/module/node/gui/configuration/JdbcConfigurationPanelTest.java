@@ -30,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -53,7 +54,7 @@ class JdbcConfigurationPanelTest {
     private static final String FOLDER_ONLY_PROFILE = "jdbc-panel-folder-only";
     private static final Path FOLDER_ONLY_DIR = Path.of("database", "SQLite", FOLDER_ONLY_PROFILE);
     private static final String FOLDER_ONLY_URL = "jdbc:sqlite:file:./database/SQLite/"
-            + FOLDER_ONLY_PROFILE + "/signum.sqlite.db";
+            + FOLDER_ONLY_PROFILE + "/ledger.db";
     private static final String MARIADB_URL = "jdbc:mariadb://db.example:3306/appdb";
 
     private boolean fixtureCreated;
@@ -169,6 +170,70 @@ class JdbcConfigurationPanelTest {
     }
 
     @Test
+    @DisplayName("a convention SQLite URL with a non-.db file is not auto-linked and shows a red validation error")
+    void nonDbUrlIsRejected() throws Exception {
+        boolean created = ensureFolderOnlyProfile();
+        try {
+            String invalidUrl = "jdbc:sqlite:file:./database/SQLite/" + FOLDER_ONLY_PROFILE + "/ledger.data";
+            JdbcConfigurationPanel panel = onEdt(() -> buildPanel(linkChanges));
+            onEdt(() -> {
+                panel.loadInitial(null, invalidUrl, "", "");
+                return null;
+            });
+            assertFalse(panel.isLinkedMode(), "an invalid extension must not derive a database-profile link");
+            assertEquals(invalidUrl, panel.getJdbcUrl(), "keep the invalid value visible so it can be corrected");
+            assertEquals("Only files with the .db extension are allowed.",
+                    onEdt(panel::getValidationError));
+            assertEquals(GuiColors.getContrastRed(),
+                    onEdt(() -> panel.getDbFileComboComponent().getForeground()),
+                    "the invalid DB file input uses the shared error red");
+
+            JComboBox<?> dbFile = (JComboBox<?>) panel.getDbFileComboComponent();
+            onEdt(() -> {
+                ((JTextField) dbFile.getEditor().getEditorComponent()).setText("ledger.db");
+                return null;
+            });
+            assertNull(onEdt(panel::getValidationError),
+                    "changing the filename to .db clears the validation error");
+        } finally {
+            if (created) {
+                Files.deleteIfExists(FOLDER_ONLY_DIR);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("the linked SQLite file picker never discovers non-.db files")
+    void filePickerDiscoversOnlyDbFiles() throws Exception {
+        Path nonDbFile = PROFILE_DIR.resolve("not-a-database.data");
+        boolean created = Files.notExists(nonDbFile);
+        if (created) {
+            Files.writeString(nonDbFile, "");
+        }
+        try {
+            JdbcConfigurationPanel panel = onEdt(() -> buildPanel(linkChanges));
+            onEdt(() -> {
+                panel.loadInitial(null, PROFILE_URL, "", "");
+                return null;
+            });
+            JComboBox<?> dbFile = (JComboBox<?>) panel.getDbFileComboComponent();
+            boolean listed = false;
+            for (int i = 0; i < onEdt(dbFile::getItemCount); i++) {
+                int index = i;
+                if ("not-a-database.data".equals(onEdt(() -> dbFile.getItemAt(index)))) {
+                    listed = true;
+                    break;
+                }
+            }
+            assertFalse(listed, "non-.db files are excluded from the discovered file list");
+        } finally {
+            if (created) {
+                Files.deleteIfExists(nonDbFile);
+            }
+        }
+    }
+
+    @Test
     @DisplayName("an explicit link to a folder-only SQLite profile materializes (no profile.json required)")
     void explicitLinkToFolderOnlyProfile() throws Exception {
         boolean created = ensureFolderOnlyProfile();
@@ -218,12 +283,11 @@ class JdbcConfigurationPanelTest {
     }
 
     @Test
-    @DisplayName("typing into the Profile field signals a live unsaved change without committing the link")
-    void profileTypingIsLiveChangeNotLinkCommit() throws Exception {
+    @DisplayName("the Profile select is a plain dropdown; selecting another profile commits the link")
+    void profileSelectIsPlainAndSelectionCommitsTheLink() throws Exception {
         JdbcConfigurationPanel.JdbcState baseline =
                 new JdbcConfigurationPanel.JdbcState("SQLite:" + PROFILE, PROFILE_URL, "", "");
-        int[] changes = { 0 };
-        JdbcConfigurationPanel panel = onEdt(() -> buildPanel(() -> changes[0]++, linkChanges));
+        JdbcConfigurationPanel panel = onEdt(() -> buildPanel(linkChanges));
         onEdt(() -> {
             panel.loadInitial("SQLite:" + PROFILE, PROFILE_URL, "", "");
             panel.setBaselines(baseline, baseline);
@@ -231,27 +295,36 @@ class JdbcConfigurationPanelTest {
             return null;
         });
         assertTrue(panel.isLinkedMode());
+        assertFalse(((JComboBox<?>) panel.getProfileComboComponent()).isEditable(),
+                "the profile select must be a plain (non-editable) dropdown over existing profiles");
         assertEquals(GuiColors.getApplied(), panel.getProfileComboComponent().getForeground(),
                 "the untouched recorded link is applied (green)");
 
-        int changesBefore = changes[0];
-        int linksBefore = linkChanges.size();
-        onEdt(() -> {
-            JComboBox<?> profileCombo = (JComboBox<?>) panel.getProfileComboComponent();
-            JTextField editor = (JTextField) profileCombo.getEditor().getEditorComponent();
-            editor.getDocument().insertString(editor.getDocument().getLength(), "x", null);
-            return null;
-        });
-        assertTrue(changes[0] > changesBefore,
-                "a keystroke must notify the host for a live recolor/dirty signal");
-        assertEquals(linksBefore, linkChanges.size(),
-                "a keystroke must not commit (persist) the in-flight link");
-        onEdt(() -> {
-            panel.refreshColors();
-            return null;
-        });
-        assertEquals(GuiColors.getUnsaved(), panel.getProfileComboComponent().getForeground(),
-                "the in-flight profile must color the row unsaved");
+        // A second existing profile (folder-only fixture) — the only way a new
+        // profile gets into the dropdown is via the host's "+" button, which
+        // creates it on disk first (discovery is folder-based).
+        String other = "jdbc-panel-switch-" + System.nanoTime();
+        Path otherDir = Path.of("database", "SQLite", other);
+        Files.createDirectories(otherDir);
+        try {
+            int linksBefore = linkChanges.size();
+            onEdt(() -> {
+                panel.refreshProfiles(); // discovery picks up the new folder
+                ((JComboBox<?>) panel.getProfileComboComponent()).setSelectedItem(other);
+                return null;
+            });
+            assertTrue(linkChanges.size() > linksBefore,
+                    "a profile selection must commit (persist) the link via the listener");
+            assertEquals("SQLite:" + other, panel.getLink(), "the effective link follows the selection");
+            onEdt(() -> {
+                panel.refreshColors();
+                return null;
+            });
+            assertEquals(GuiColors.getUnsaved(), panel.getProfileComboComponent().getForeground(),
+                    "the switched profile must color the row unsaved");
+        } finally {
+            Files.deleteIfExists(otherDir);
+        }
     }
 
     @Test
@@ -259,16 +332,20 @@ class JdbcConfigurationPanelTest {
     void editableCombosAreStyledLikeUnifiedDropdowns() throws Exception {
         JdbcConfigurationPanel panel = onEdt(() -> buildPanel(linkChanges));
         onEdt(() -> {
-            // manual mode: both the Profile and the DB-file combo are editable
+            // manual mode: the Profile row does not exist; the DB-file combo is editable
             panel.loadInitial(null, "jdbc:sqlite:file:./elsewhere/other.db", "", "");
             return null;
         });
         final Object[] results = new Object[1];
         onEdt(() -> {
             List<String> errors = new ArrayList<>();
+            // the profile select is a PLAIN (non-editable) dropdown — it lists
+            // existing database profiles only, it is never typed into
+            if (((JComboBox<?>) panel.getProfileComboComponent()).isEditable()) {
+                errors.add("Profile: the select must be non-editable (existing profiles only)");
+            }
             // the SINGLE standard height — the one place it is defined
             int plainH = ConfigurationUtils.standardControlHeight();
-            checkEditableCombo(errors, "Profile", (JComboBox<?>) panel.getProfileComboComponent(), plainH);
             checkEditableCombo(errors, "DB file", (JComboBox<?>) panel.getDbFileComboComponent(), plainH);
             results[0] = errors;
             return null;
@@ -398,6 +475,31 @@ class JdbcConfigurationPanelTest {
     }
 
     @Test
+    @DisplayName("requestLinkMode(true) is rejected when the engine has no existing database profiles")
+    void linkRejectedWithoutExistingProfiles() throws Exception {
+        // The profile select lists existing profiles only: with a single none
+        // for the engine there is nothing to link to, so the link stays off
+        // (creating a profile is the host's "+" button's job). Requires an
+        // empty MariaDB profile base — other fixtures may occupy it.
+        Path mariaBase = Path.of("database", "MariaDB");
+        org.junit.jupiter.api.Assumptions.assumeFalse(Files.exists(mariaBase),
+                "requires an empty MariaDB profile base");
+        JdbcConfigurationPanel panel = onEdt(() -> buildPanel(linkChanges));
+        onEdt(() -> {
+            panel.loadManual(MARIADB_URL, "alice", "secret");
+            return null;
+        });
+        onEdt(() -> {
+            panel.requestLinkMode(true);
+            return null;
+        });
+        assertFalse(panel.isLinkedMode(), "without an existing profile the link must stay off");
+        assertTrue(panel.getLink().isEmpty(), "no link exists without a profile");
+        assertFalse(((JComboBox<?>) panel.getProfileComboComponent()).isEditable(),
+                "the profile select stays a plain dropdown — a new name can never be typed in");
+    }
+
+    @Test
     @DisplayName("link toggles keep the profile, manual path, and DB-file inputs independent")
     void linkTogglePreservesUnsavedProfileAndDbFile() throws Exception {
         String profileName = "jdbc-link-toggle-" + System.nanoTime();
@@ -412,49 +514,54 @@ class JdbcConfigurationPanelTest {
                 JdbcConfigurationPanel.JdbcState baseline = panel.getState();
                 panel.setBaselines(baseline, baseline);
                 ((JComboBox<?>) panel.getProfileComboComponent()).setSelectedItem(profileName);
-                JComboBox<?> dbCombo = (JComboBox<?>) panel.getDbFileComboComponent();
-                dbCombo.getEditor().setItem("z-unsaved.db");
                 return null;
             });
 
-            String expectedUrl = "jdbc:sqlite:file:./database/SQLite/" + profileName + "/z-unsaved.db";
-            String manualUrl = "jdbc:sqlite:file:./database/SQLite/z-unsaved.db";
+            // Linked mode: the DB file select is a PLAIN (non-editable) dropdown
+            // over the profile's *.db files — the new profile's file is picked.
+            assertFalse(onEdt(() -> ((JComboBox<?>) panel.getDbFileComboComponent()).isEditable()),
+                    "linked mode: the DB file select must be non-editable (new files come from the profile wizard)");
+            onEdt(() -> {
+                ((JComboBox<?>) panel.getDbFileComboComponent()).setSelectedItem("a-initial.db");
+                return null;
+            });
+            String expectedUrl = "jdbc:sqlite:file:./database/SQLite/" + profileName + "/a-initial.db";
             String manualPath = onEdt(() -> comboText((JComboBox<?>) panel.getPathFieldComponent()));
             assertEquals(profileName, panel.getProfileName(), "the new profile selection is currently unsaved");
             assertEquals(expectedUrl, panel.getJdbcUrl(), "the selected DB file forms the current URL");
-            assertFalse(onEdt(() -> comboContains((JComboBox<?>) panel.getDbFileComboComponent(), "z-unsaved.db")),
-                    "a custom current DB-file value must stay in the editor, not be added to the dropdown options");
 
             onEdt(() -> {
                 panel.requestLinkMode(false);
                 return null;
             });
             assertFalse(panel.isLinkedMode());
-            assertEquals(manualUrl, panel.getJdbcUrl(),
+            assertTrue(onEdt(() -> ((JComboBox<?>) panel.getDbFileComboComponent()).isEditable()),
+                    "manual mode: the DB file select must be editable again");
+            assertEquals("jdbc:sqlite:file:" + manualPath + "/a-initial.db", panel.getJdbcUrl(),
                     "manual mode must compose the independent Path and DB file, not use the linked profile path");
             assertEquals(manualPath, onEdt(() -> comboText((JComboBox<?>) panel.getPathFieldComponent())),
                     "unlinking must not copy the linked profile path into the manual Path field");
             assertEquals(profileName,
                     onEdt(() -> ((JComboBox<?>) panel.getProfileComboComponent()).getSelectedItem()),
                     "unlinking must not discard the current profile selection");
-            assertEquals("z-unsaved.db",
+            assertEquals("a-initial.db",
                     onEdt(() -> comboText((JComboBox<?>) panel.getDbFileComboComponent())),
                     "unlinking must not discard the current DB-file selection");
-            assertFalse(onEdt(() -> comboContains((JComboBox<?>) panel.getDbFileComboComponent(), "z-unsaved.db")),
-                    "unlinking must not add the current DB-file value to the option list");
 
             onEdt(() -> {
                 panel.requestLinkMode(true);
                 return null;
             });
             assertTrue(panel.isLinkedMode());
+            assertFalse(onEdt(() -> ((JComboBox<?>) panel.getDbFileComboComponent()).isEditable()),
+                    "relinking must make the DB file select non-editable again");
             assertEquals(profileName, panel.getProfileName(),
                     "relinking must restore the selected profile instead of the first SQLite profile");
             assertEquals(manualPath, onEdt(() -> comboText((JComboBox<?>) panel.getPathFieldComponent())),
                     "relinking must not change the independent manual Path field");
-            assertEquals("z-unsaved.db",
+            assertEquals("a-initial.db",
                     onEdt(() -> comboText((JComboBox<?>) panel.getDbFileComboComponent())),
-                    "relinking must preserve the DB-file editor value even when options are refreshed");
+                    "relinking must preserve the DB-file selection even when options are refreshed");
             assertEquals(expectedUrl, panel.getJdbcUrl(),
                     "relinking must restore the unsaved DB-file selection");
         } finally {
@@ -545,8 +652,8 @@ class JdbcConfigurationPanelTest {
     }
 
     @Test
-    @DisplayName("typing a profile flags only the Profile row and the URL preview — Engine and DB file stay applied")
-    void typingFlagsOnlyTheProfileRow() throws Exception {
+    @DisplayName("selecting another profile flags only the Profile row and the URL preview — Engine and DB file stay applied")
+    void profileSelectionFlagsOnlyTheProfileRow() throws Exception {
         JdbcConfigurationPanel panel = onEdt(() -> buildPanel(linkChanges));
         onEdt(() -> {
             panel.loadInitial("SQLite:" + PROFILE, PROFILE_URL, "", "");
@@ -562,44 +669,44 @@ class JdbcConfigurationPanelTest {
         assertFalse(labelTexts(panel).stream().anyMatch(t -> t.endsWith(" *")),
                 "a matching baseline must flag nothing; " + labelTexts(panel));
 
-        // A keystroke (no Enter): the Profile row and the URL preview flip to
-        // unsaved; the untouched Engine select and the DB file select must
-        // NOT be flagged (they were not changed by the user).
-        final Object[] out = new Object[1];
-        onEdt(() -> {
-            JComboBox<?> combo = (JComboBox<?>) panel.getProfileComboComponent();
-            JTextField f = (JTextField) combo.getEditor().getEditorComponent();
-            f.getDocument().insertString(0, "x", null);
-            out[0] = f;
-            return null;
-        });
-        JTextField typed = (JTextField) out[0];
-        onEdt(() -> {
-            panel.refreshColors();
-            return null;
-        });
+        // A profile selection (the plain dropdown's only means of change):
+        // the Profile row and the URL preview flip to unsaved; the untouched
+        // Engine select and the DB file select must NOT be flagged (they were
+        // not changed by the user).
+        String other = "jdbc-panel-flags-" + System.nanoTime();
+        Path otherDir = Path.of("database", "SQLite", other);
+        Files.createDirectories(otherDir);
         try {
+            onEdt(() -> {
+                panel.refreshProfiles(); // discovery picks up the new folder
+                ((JComboBox<?>) panel.getProfileComboComponent()).setSelectedItem(other);
+                return null;
+            });
+            onEdt(() -> {
+                panel.refreshColors();
+                return null;
+            });
             assertTrue(labelTexts(panel).stream().anyMatch(t -> t.startsWith("Profile") && t.endsWith(" *")),
-                    "the Profile row must be flagged while typing; " + labelTexts(panel));
+                    "the Profile row must be flagged after the selection; " + labelTexts(panel));
             assertEquals(GuiColors.getUnsaved(),
                     onEdt(() -> panel.getProfileComboComponent().getForeground()),
-                    "the profile select must be unsaved while typing");
+                    "the profile select must be unsaved after the selection");
             assertEquals(GuiColors.getUnsaved(),
                     onEdt(() -> panel.getPreviewField().getForeground()),
-                    "the URL preview must be unsaved while typing (the URL differs)");
+                    "the URL preview must be unsaved after the selection (the URL differs)");
             assertFalse(labelTexts(panel).stream().anyMatch(
                             t -> (t.startsWith("Engine") || t.startsWith("DB file")) && t.endsWith(" *")),
                     "the untouched Engine and DB file rows must NOT be flagged; " + labelTexts(panel));
             assertEquals(GuiColors.getApplied(),
                     onEdt(() -> panel.getEngineComboComponent().getForeground()),
-                    "the engine select must stay applied while typing the profile");
+                    "the engine select must stay applied while the profile changes");
         } finally {
-            typed.setText("");
+            Files.deleteIfExists(otherDir);
         }
     }
 
     @Test
-    @DisplayName("selecting or typing another SQLite DB file flags the DB file row unsaved immediately")
+    @DisplayName("linked: a DB-file selection and manual: a typed name flag the DB file row unsaved immediately")
     void dbFileChangeFlagsTheRowUnsaved() throws Exception {
         boolean altCreated = false;
         try {
@@ -620,9 +727,13 @@ class JdbcConfigurationPanelTest {
                     onEdt(() -> panel.getDbFileComboComponent().getForeground()),
                     "the untouched DB file row is applied");
 
-            // 1) dropdown selection: the switch must flag the row immediately
+            // 1) linked mode: the file select is a PLAIN (non-editable) dropdown
+            //    over the profile's *.db files — the switch is a selection and
+            //    must flag the row immediately.
+            JComboBox<?> combo = (JComboBox<?>) onEdt(() -> panel.getDbFileComboComponent());
+            assertFalse(onEdt(() -> combo.isEditable()),
+                    "linked mode: the DB file select must be non-editable (new files come from the profile wizard)");
             onEdt(() -> {
-                JComboBox<?> combo = (JComboBox<?>) panel.getDbFileComboComponent();
                 combo.setSelectedItem("alt-unit.db");
                 return null;
             });
@@ -636,12 +747,20 @@ class JdbcConfigurationPanelTest {
                     onEdt(() -> panel.getDbFileComboComponent().getForeground()),
                     "a switched DB file must be unsaved immediately");
 
-            // 2) typing a new file name (no Enter): the composed URL and the
-            //    row must track the LIVE editor text, not the uncommitted model
+            // 2) manual mode: the select is editable again and the composed URL
+            //    and the row must track the LIVE editor text, not the uncommitted
+            //    model.
+            onEdt(() -> {
+                panel.requestLinkMode(false);
+                return null;
+            });
+            assertTrue(onEdt(() -> combo.isEditable()),
+                    "manual mode: the DB file select must be editable");
+            String manualPath = onEdt(() -> comboText((JComboBox<?>) panel.getPathFieldComponent()));
             final Object[] out = new Object[1];
             onEdt(() -> {
-                JComboBox<?> combo = (JComboBox<?>) panel.getDbFileComboComponent();
-                JTextField f = (JTextField) combo.getEditor().getEditorComponent();
+                JComboBox<?> c = (JComboBox<?>) panel.getDbFileComboComponent();
+                JTextField f = (JTextField) c.getEditor().getEditorComponent();
                 f.getDocument().insertString(f.getDocument().getLength(), "x", null); // alt-unit.dbx
                 out[0] = f;
                 return null;
@@ -652,11 +771,11 @@ class JdbcConfigurationPanelTest {
             });
             JTextField typed = (JTextField) out[0];
             try {
-                assertEquals("jdbc:sqlite:file:./database/SQLite/" + PROFILE + "/alt-unit.dbx",
+                assertEquals("jdbc:sqlite:file:" + manualPath + "/alt-unit.dbx",
                         panel.getJdbcUrl(), "the composed URL must track the typed (uncommitted) file name");
-                assertEquals(GuiColors.getUnsaved(),
+                assertEquals(GuiColors.getContrastRed(),
                         onEdt(() -> panel.getDbFileComboComponent().getForeground()),
-                        "the DB file row must be unsaved while typing");
+                        "an invalid extension must use the validation error color");
                 assertTrue(labelTexts(panel).stream().anyMatch(t -> t.startsWith("DB file") && t.endsWith(" *")),
                         "the DB file label must carry the unsaved star while typing; " + labelTexts(panel));
             } finally {

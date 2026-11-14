@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
+import javax.swing.JButton;
 import javax.swing.JTabbedPane;
 import javax.swing.SwingUtilities;
 
@@ -51,6 +52,13 @@ class NodePanelNewTabPatternTest {
         // pattern), not a dedicated "+" tab.
         assertNotNull(pane.getClientProperty("JTabbedPane.trailingComponent"),
                 "the new-profile '+' must be the tab row's trailing component");
+        javax.swing.JPanel trailing = (javax.swing.JPanel) pane.getClientProperty("JTabbedPane.trailingComponent");
+        JButton plusButton = (JButton) trailing.getComponent(0);
+        assertNotNull(plusButton.getIcon(), "the plus button must carry its plus glyph");
+        assertNull(plusButton.getRolloverIcon(),
+                "the trailing '+' must be a static glyph (no grow-on-hover): the surrounding "
+                        + "profile tabs don't grow, so neither does the '+' — grow-on-hover is "
+                        + "reserved for the configuration-panel function buttons");
         // Profile tabs are closable via the native close "X" (routes to the delete flow).
         assertEquals(Boolean.TRUE, pane.getClientProperty("JTabbedPane.tabClosable"),
                 "profile tabs must be closable (native 'X')");

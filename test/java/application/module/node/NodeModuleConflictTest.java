@@ -7,8 +7,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
-import java.nio.file.Paths;
 import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -33,7 +33,7 @@ class NodeModuleConflictTest {
 
     private static final String NAME_A = "conflict-a-" + System.nanoTime();
     private static final String NAME_B = "conflict-b-" + System.nanoTime();
-    private static final java.nio.file.Path CONF = Paths.get("./conf");
+    @TempDir static java.nio.file.Path CONF;
 
     private NodeModule module() {
         return NodeModule.getInstance();

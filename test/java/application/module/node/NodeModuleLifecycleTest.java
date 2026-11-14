@@ -4,10 +4,10 @@ import application.module.node.profile.NodeProfile;
 import application.module.node.profile.NodeProfileRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.InOrder;
 import org.mockito.Mockito;
 
-import java.nio.file.Paths;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -29,7 +29,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 class NodeModuleLifecycleTest {
 
     private static final String PROFILE = "lifecycle-test-" + System.nanoTime();
-    private static final java.nio.file.Path CONF = Paths.get("./conf");
+    @TempDir static java.nio.file.Path CONF;
 
     private NodeModule module() {
         return NodeModule.getInstance();

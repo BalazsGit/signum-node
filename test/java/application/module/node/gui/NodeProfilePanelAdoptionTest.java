@@ -5,11 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.nio.file.Paths;
 import java.util.List;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import application.module.node.Signum;
 import application.module.node.profile.NodeProfile;
@@ -33,6 +33,8 @@ class NodeProfilePanelAdoptionTest {
 
     private static int profileSeq = 0;
 
+    @TempDir static java.nio.file.Path confRoot;
+
     private static NodeProfile newProfile() {
         return new NodeProfile("adoption-test-" + (profileSeq++));
     }
@@ -42,7 +44,7 @@ class NodeProfilePanelAdoptionTest {
     }
 
     private static Signum newSignum(NodeProfile profile) {
-        return new Signum(profile, Paths.get("./conf"));
+        return new Signum(profile, confRoot);
     }
 
     @Test

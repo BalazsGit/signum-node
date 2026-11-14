@@ -1,11 +1,14 @@
 package application.utils.gui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.icons.FlatSearchIcon;
+import jiconfont.icons.font_awesome.FontAwesome;
+import jiconfont.swing.IconFontSwing;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.JButton;
 import javax.swing.JComponent;
@@ -16,15 +19,98 @@ import javax.swing.JTextField;
 import javax.swing.ListCellRenderer;
 import javax.swing.SwingUtilities;
 import javax.swing.border.Border;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Properties;
+import java.util.Set;
 
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Tests of {@link ConfigurationUtils}' input styling.
  */
 @DisplayName("ConfigurationUtils input styling tests")
 class ConfigurationUtilsTest {
+
+    @BeforeAll
+    static void registerIconFont() {
+        // The profile-action catalog's other entries are FontAwesome-backed; register the
+        // icon font (as the app does at startup) so the catalog resolves when this test
+        // runs in isolation. (The New Profile "+" itself is the thin PlusGlyphIcon, which
+        // needs no icon font.)
+        IconFontSwing.register(FontAwesome.getIconFont());
+    }
+
+    @Test
+    @DisplayName("New Profile uses the shared plus glyph and fixed-size hover treatment")
+    void newProfileButtonUsesSharedPlusGlyph() {
+        JButton button = new JButton();
+        button.setToolTipText("Create a profile");
+        ConfigurationUtils.styleNewProfileButton(button);
+
+        assertNotNull(button.getIcon());
+        assertNotNull(button.getRolloverIcon());
+        assertEquals(button.getIcon().getIconWidth(), button.getRolloverIcon().getIconWidth());
+        assertEquals(button.getIcon().getIconHeight(), button.getRolloverIcon().getIconHeight());
+        assertEquals(ConfigurationUtils.PROFILE_TOOLBAR_CURSOR, button.getCursor());
+        assertEquals("Create a profile", button.getToolTipText());
+    }
+
+    @Test
+    @DisplayName("property values with control characters round-trip through visible escapes")
+    void propertyControlCharactersUseVisibleEscapes() {
+        String original = "tab\tline\nreturn\rformfeed\fvertical" + (char) 0x000B + "backslash\\text";
+        String visible = ConfigurationUtils.propertyValueForEditing(original);
+
+        assertEquals("tab\\tline\\nreturn\\rformfeed\\fvertical\\u000Bbackslash\\\\text", visible);
+        assertEquals(original, ConfigurationUtils.propertyValueFromEditing(visible));
+        assertEquals("\\t", ConfigurationUtils.escapePropertyValue("\t"),
+                "properties files store a tab as the two-character escape \\t");
+        assertEquals("\\u000B", ConfigurationUtils.escapePropertyValue(String.valueOf((char) 0x000B)),
+                "other control characters use a Unicode properties escape");
+    }
+
+    @Test
+    @DisplayName("literal escape-looking text is visible and round-trips without becoming a control character")
+    void literalBackslashSequencesAreEscapedForEditing() {
+        String original = "\\t and \\n and \\\\";
+        String visible = ConfigurationUtils.propertyValueForEditing(original);
+
+        assertEquals("\\\\t and \\\\n and \\\\\\\\", visible);
+        assertEquals(original, ConfigurationUtils.propertyValueFromEditing(visible));
+        assertEquals("\t\t", ConfigurationUtils.propertyValueFromEditing("\\t\t"),
+                "a visible tab escape followed by a literal tab represents two tabs");
+    }
+
+    @Test
+    @DisplayName("debug trace separator whitespace is visible as reversible escapes")
+    void debugTraceSeparatorWhitespaceIsVisible() {
+        assertEquals("\\u0020\\t\\n",
+                ConfigurationUtils.debugTraceSeparatorForEditing(" \t\n"));
+        assertEquals("\\u0020\\t",
+                ConfigurationUtils.encodeWhitespaceForEditing(" \t"),
+                "raw whitespace typed or pasted into the separator editor is made visible");
+        assertEquals(" \t", ConfigurationUtils.propertyValueFromEditing("\\u0020\\t"));
+    }
+
+    @Test
+    @DisplayName("property saving preserves leading and trailing spaces")
+    void propertySavingPreservesSeparatorSpaces(@TempDir Path tempDir) throws Exception {
+        Path file = tempDir.resolve("profile.properties");
+        Properties properties = new Properties();
+        properties.setProperty("separator", "  ");
+
+        ConfigurationUtils.savePropertiesPreservingFormat(file, properties, Set.of("separator"));
+
+        Properties loaded = new Properties();
+        try (var input = Files.newInputStream(file)) {
+            loaded.load(input);
+        }
+        assertEquals("  ", loaded.getProperty("separator"));
+    }
 
     @Test
     @DisplayName("styleComboEditor aligns the editable combo's text x with a plain combo's value text x")

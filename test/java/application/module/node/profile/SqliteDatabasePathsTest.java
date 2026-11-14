@@ -65,18 +65,32 @@ class SqliteDatabasePathsTest {
     }
 
     @Test
-    @DisplayName("splitUrl: tolerates a missing file: prefix and a ?query suffix")
+    @DisplayName("splitUrl: preserves the configured file name for validation")
     void splitUrlTolerant() {
         SqliteDatabasePaths.SqliteUrlParts plain =
-                SqliteDatabasePaths.splitUrl("jdbc:sqlite:./database/SQLite/mainnet/signum.sqlite.db");
-        assertEquals("signum.sqlite.db", plain.fileName());
+                SqliteDatabasePaths.splitUrl("jdbc:sqlite:./database/SQLite/mainnet/signum.sqlite");
+        assertEquals("signum.sqlite", plain.fileName());
 
         SqliteDatabasePaths.SqliteUrlParts withFile =
-                SqliteDatabasePaths.splitUrl("jdbc:sqlite:file:./database/SQLite/mainnet/signum.sqlite.db?mode=ro");
-        assertEquals("signum.sqlite.db", withFile.fileName());
+                SqliteDatabasePaths.splitUrl("jdbc:sqlite:file:./database/SQLite/mainnet/data.sqlite?mode=ro");
+        assertEquals("data.sqlite", withFile.fileName());
+
+        SqliteDatabasePaths.SqliteUrlParts withoutExtension =
+                SqliteDatabasePaths.splitUrl("jdbc:sqlite:file:./database/SQLite/mainnet/ledger");
+        assertEquals("database/SQLite/mainnet",
+                SqliteDatabasePaths.normalize(withoutExtension.dir().toString()));
+        assertEquals("ledger", withoutExtension.fileName(),
+                "the invalid file name remains available for a useful validation error");
+
+        SqliteDatabasePaths.SqliteUrlParts arbitraryExtension =
+                SqliteDatabasePaths.splitUrl("jdbc:sqlite:file:./database/SQLite/mainnet/ledger.data");
+        assertEquals("database/SQLite/mainnet",
+                SqliteDatabasePaths.normalize(arbitraryExtension.dir().toString()));
+        assertEquals("ledger.data", arbitraryExtension.fileName(),
+                "the invalid extension remains available for a useful validation error");
 
         SqliteDatabasePaths.SqliteUrlParts dirOnly =
-                SqliteDatabasePaths.splitUrl("jdbc:sqlite:file:./database/SQLite/mainnet?mode=ro");
+                SqliteDatabasePaths.splitUrl("jdbc:sqlite:file:./database/SQLite/mainnet/?mode=ro");
         assertEquals("database/SQLite/mainnet", SqliteDatabasePaths.normalize(dirOnly.dir().toString()));
         assertEquals("", dirOnly.fileName());
     }
@@ -84,9 +98,9 @@ class SqliteDatabasePathsTest {
     @Test
     @DisplayName("splitUrl: a separator-free URL is a file in the working directory")
     void splitUrlSeparatorFree() {
-        SqliteDatabasePaths.SqliteUrlParts parts = SqliteDatabasePaths.splitUrl("jdbc:sqlite:signum.sqlite.db");
+        SqliteDatabasePaths.SqliteUrlParts parts = SqliteDatabasePaths.splitUrl("jdbc:sqlite:signum.sqlite");
         assertEquals(".", SqliteDatabasePaths.normalize(parts.dir().toString()));
-        assertEquals("signum.sqlite.db", parts.fileName());
+        assertEquals("signum.sqlite", parts.fileName());
     }
 
     @Test
@@ -94,6 +108,9 @@ class SqliteDatabasePathsTest {
     void splitUrlNegative() {
         assertNull(SqliteDatabasePaths.splitUrl("jdbc:mariadb://localhost/signum"));
         assertNull(SqliteDatabasePaths.splitUrl(null));
+        assertNull(SqliteDatabasePaths.splitUrl(
+                "jdbc:sqlite:file:./database/SQLite/<name>/signum.sqlite.db"),
+                "invalid platform paths are rejected rather than thrown");
     }
 
     @Test
@@ -101,9 +118,9 @@ class SqliteDatabasePathsTest {
     void composeUrl() {
         assertEquals("jdbc:sqlite:file:./database/SQLite/mainnet/signum.sqlite.db",
                 SqliteDatabasePaths.composeUrl(Path.of("database", "SQLite", "mainnet"), "signum.sqlite.db"));
-        assertEquals("jdbc:sqlite:file:./database/SQLite/mainnet",
+        assertEquals("jdbc:sqlite:file:./database/SQLite/mainnet/",
                 SqliteDatabasePaths.composeUrl(Path.of("database", "SQLite", "mainnet"), ""));
-        assertEquals("jdbc:sqlite:file:./database/SQLite/mainnet",
+        assertEquals("jdbc:sqlite:file:./database/SQLite/mainnet/",
                 SqliteDatabasePaths.composeUrl(Path.of("database", "SQLite", "mainnet"), null));
     }
 
@@ -114,6 +131,14 @@ class SqliteDatabasePathsTest {
         SqliteDatabasePaths.SqliteUrlParts parts = SqliteDatabasePaths.splitUrl(url);
         assertEquals("database/SQLite/mainnet", SqliteDatabasePaths.normalize(parts.dir().toString()));
         assertEquals("signum.sqlite.db", parts.fileName());
+
+        SqliteDatabasePaths.SqliteUrlParts directory =
+                SqliteDatabasePaths.splitUrl(
+                        SqliteDatabasePaths.composeUrl(Path.of("database", "SQLite", "mainnet"), ""));
+        assertEquals("database/SQLite/mainnet",
+                SqliteDatabasePaths.normalize(directory.dir().toString()));
+        assertEquals("", directory.fileName(),
+                "the trailing slash preserves the unambiguous directory-only form");
     }
 
     @Test
@@ -122,6 +147,7 @@ class SqliteDatabasePathsTest {
         Files.createFile(dir.resolve("b.db"));
         Files.createFile(dir.resolve("A.DB"));
         Files.createFile(dir.resolve("notes.txt"));
+        Files.createFile(dir.resolve("ledger.data"));
         Files.createDirectory(dir.resolve("sub.db"));
 
         assertEquals(List.of("A.DB", "b.db"), SqliteDatabasePaths.discoverDbFiles(dir));
@@ -141,7 +167,9 @@ class SqliteDatabasePathsTest {
         assertTrue(SqliteDatabasePaths.matchesProfile("mainnet",
                 "jdbc:sqlite:file:./database/SQLite/mainnet/signum.sqlite.db"));
         assertTrue(SqliteDatabasePaths.matchesProfile("mainnet",
-                "jdbc:sqlite:file:./database/SQLite/mainnet"));
+                "jdbc:sqlite:file:./database/SQLite/mainnet/ledger"));
+        assertTrue(SqliteDatabasePaths.matchesProfile("mainnet",
+                "jdbc:sqlite:file:./database/SQLite/mainnet/"));
         assertFalse(SqliteDatabasePaths.matchesProfile("mainnet",
                 "jdbc:sqlite:file:./database/SQLite/other/signum.sqlite.db"));
         assertFalse(SqliteDatabasePaths.matchesProfile("mainnet",
@@ -158,6 +186,9 @@ class SqliteDatabasePathsTest {
         assertTrue(SqliteDatabasePaths.isDbFile("signum.sqlite.db"));
         assertTrue(SqliteDatabasePaths.isDbFile("SIGNUM.DB"));
         assertFalse(SqliteDatabasePaths.isDbFile("signum.sqlite"));
+        assertFalse(SqliteDatabasePaths.isDbFile("folder/signum.db"));
+        assertFalse(SqliteDatabasePaths.isDbFile("folder\\signum.db"));
+        assertFalse(SqliteDatabasePaths.isDbFile(""));
         assertFalse(SqliteDatabasePaths.isDbFile(null));
     }
 }

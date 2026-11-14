@@ -461,7 +461,7 @@ class PropertiesProfileLoaderTest {
     @DisplayName("ensureUserDefaultFile()")
     class EnsureUserDefaultFileTests {
 
-        private static final String NODE_DEFAULT_RESOURCE = "/conf/node/profiles/node-default.properties";
+        private static final String NODE_DEFAULT_RESOURCE = "/conf/node/profiles/template/node-default.properties";
 
         @Test
         @DisplayName("creates the user-owned file from the classpath resource when missing")

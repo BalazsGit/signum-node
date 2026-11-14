@@ -15,6 +15,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
+import java.util.Properties;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -75,6 +76,52 @@ class WizardFinishTest {
             } else {
                 assertNull(seeded,
                         "'Default' applied (or a stale marker) — no explicit assignment is seeded");
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("the virtual in-memory session profile is persisted as the profile file (created only at finish)")
+    void virtualProfileIsPersistedAtFinish() throws Exception {
+        String name = "wizard_virtual_" + System.nanoTime();
+        String virtualUrl = "jdbc:sqlite:file:./database/SQLite/" + name + "/virtual.sqlite.db";
+        try (Probe ignored = new Probe(name)) {
+            WizardContext c = context(name, null, null);
+            // The wizard's node-configuration step accumulated its values in the
+            // virtual in-memory profile (a DB.Url that differs from the
+            // context's own SSOT mapping — the virtual profile is authoritative).
+            Properties virtualProps = new Properties();
+            virtualProps.setProperty(Props.DB_URL.getName(), virtualUrl);
+            c.setVirtualProfile(new NodeProfile.Builder(name).properties(virtualProps).build());
+
+            assertEquals(name, WizardFinish.createProfile(c));
+            assertEquals(virtualUrl, dbUrlOf(name),
+                    "the profile file takes the virtual in-memory profile's values at finish");
+        }
+    }
+
+    @Test
+    @DisplayName("G5: an explicitly selected logging profile is assigned to the new node")
+    void explicitLoggingProfileIsAssigned() throws Exception {
+        // A real logging profile to assign (unique, cleaned up after the probe).
+        String loggingProfile = "wiz_logging_assign_" + System.nanoTime();
+        LoggingProfileRepository repo = new LoggingProfileRepository();
+        Properties loggingProps = new Properties();
+        loggingProps.setProperty("rootLogger.level", "DEBUG");
+        repo.saveProps(ModuleIds.NODE, loggingProfile, loggingProps);
+        String name = "wizard_probe_" + System.nanoTime();
+        try (Probe ignored = new Probe(name)) {
+            WizardContext c = context(name, null, null);
+            c.setSelectedLoggingProfileName(loggingProfile);
+            WizardFinish.createProfile(c);
+            assertEquals(loggingProfile,
+                    new LoggingAssignmentStore().getAssignment(name).get(ModuleIds.NODE),
+                    "an explicitly selected logging profile is assigned to the node (G5)");
+        } finally {
+            try {
+                repo.delete(ModuleIds.NODE, loggingProfile);
+            } catch (Exception ignored) {
+                // best-effort cleanup of the probe logging profile
             }
         }
     }

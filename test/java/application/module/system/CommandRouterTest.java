@@ -16,7 +16,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -46,7 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class CommandRouterTest {
 
     private static final String PROFILE = "cmd-router-test-" + System.nanoTime();
-    private static final Path CONF = Paths.get("./conf");
+    @TempDir static Path CONF;
 
     private NodeModule module() {
         return NodeModule.getInstance();

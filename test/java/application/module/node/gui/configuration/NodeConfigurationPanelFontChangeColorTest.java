@@ -8,7 +8,6 @@ import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JTextField;
 import javax.swing.JFrame;
-import javax.swing.JCheckBox;
 import javax.swing.JTabbedPane;
 import javax.swing.SwingUtilities;
 import java.awt.Color;
@@ -24,6 +23,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -39,14 +39,20 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
  * lost. {@link NodeConfigurationPanel#updateUI()} must therefore re-apply
  * the colors (refreshUIColors) as its LAST step, after every re-style.
  *
- * The test makes the profile select dirty (its editor gets the unsaved
- * color), changes the global font size the same way the appearance panel
- * does (updateCommonFontKeys + a full UI tree update), and asserts that:
+ * The test makes the linked-mode DB-file select dirty (its editor gets the
+ * unsaved color), changes the global font size the same way the appearance
+ * panel does (updateCommonFontKeys + a full UI tree update), and asserts
+ * that:
  * <ol>
  *   <li>the recreated editor keeps the dirty-state color, and</li>
  *   <li>even if the color were lost (simulated with a sentinel), the next
  *       UI refresh (panel.updateUI) restores the state color.</li>
  * </ol>
+ * The JDBC section's Profile select is a PLAIN (non-editable) combo over
+ * existing database profiles — its state color is painted on the combo
+ * itself, and it must survive the font change too (the test's node profile
+ * needs an existing database profile of its own name, so the auto-link and
+ * the link-mode toggle have something to link to).
  */
 class NodeConfigurationPanelFontChangeColorTest {
 
@@ -70,6 +76,15 @@ class NodeConfigurationPanelFontChangeColorTest {
             Files.deleteIfExists(props);
             Files.writeString(props,
                     "DB.Url=jdbc:sqlite:file:./database/SQLite/" + PROFILE + "/signum.sqlite.db" + System.lineSeparator());
+        }
+        // Linked mode requires an EXISTING database profile (the profile select
+        // lists existing profiles only — a link is rejected without one): the
+        // test node profile's convention folder (its auto-link target) must be
+        // there.
+        Path dbDir = Path.of("database", "SQLite", PROFILE);
+        boolean dbDirCreated = !Files.exists(dbDir);
+        if (dbDirCreated) {
+            Files.createDirectories(dbDir);
         }
 
         AtomicReference<Object[]> refs = new AtomicReference<>();
@@ -103,25 +118,51 @@ class NodeConfigurationPanelFontChangeColorTest {
             assertTrue(!valueComboSnapshots.isEmpty(),
                     "the node configuration panel must contain state-aware editable value combos");
 
-            // Linked mode: the (editable, state-aware) profile select is the
-            // component whose editor is recreated by an L&F/font change.
-            JCheckBox checkbox = findCheckbox(wrapper);
-            assertNotNull(checkbox, "the 'Linked Database Profile' checkbox must exist");
-            SwingUtilities.invokeAndWait(checkbox::doClick);
+            // The convention URL auto-links the node to its (existing) database
+            // profile — wait for the async link load before driving the UI.
+            JdbcConfigurationPanel jdbc = (JdbcConfigurationPanel) jdbcPanel;
+            awaitUI(jdbc::isLinkedMode);
+            LinkedDbModeSelector selector = findSelector(wrapper);
+            assertNotNull(selector, "the database-URL source selector must exist");
+            assertTrue(selector.isLinkedMode(),
+                    "the convention URL must auto-link the database profile (Linked Database Profile radio)");
+
+            JComboBox<?> profileCombo = (JComboBox<?>) jdbc.getProfileComboComponent();
+            assertFalse(profileCombo.isEditable(),
+                    "the Profile select must be a plain (non-editable) dropdown over existing profiles");
+            Color profileColor = profileCombo.getForeground();
+            assertNotNull(profileColor, "the profile select must carry its value-state color");
+
+            // Switch the row to the MANUAL mode: the DB-file select becomes the
+            // editable combo whose editor an L&F/font change recreates (the
+            // linked-mode DB-file select is a plain, non-editable dropdown over
+            // the profile's files).
+            SwingUtilities.invokeAndWait(() -> selector.getCustomRadio().doClick());
             settle(owner);
 
-            JComboBox<?> profileCombo = findProfileCombo(jdbcPanel);
-            assertNotNull(profileCombo, "the editable Profile select must be visible in linked mode");
-            JTextField editor0 = (JTextField) profileCombo.getEditor().getEditorComponent();
-            assertNotNull(editor0, "the profile select must have a text editor");
+            JComboBox<?> dbFileCombo = (JComboBox<?>) jdbc.getDbFileComboComponent();
+            assertTrue(dbFileCombo.isVisible() && dbFileCombo.isEditable(),
+                    "the DB-file select must be a visible editable combo in manual mode");
+            JTextField editor0 = (JTextField) dbFileCombo.getEditor().getEditorComponent();
+            assertNotNull(editor0, "the DB-file select must have a text editor");
 
-            // Make the profile select dirty: the document listener resolves
-            // the value state and colors the editor with the unsaved color.
-            SwingUtilities.invokeAndWait(() -> editor0.setText("definitely-not-a-profile"));
+            // Make the DB-file select dirty: COMMIT the value into the model
+            // (a font/L&F change recreates the editor from the MODEL item — an
+            // uncommitted editor-only text would not survive it) — the value
+            // state is then unsaved, and the editor gets the unsaved color.
+            SwingUtilities.invokeAndWait(
+                    () -> ((JComboBox<Object>) dbFileCombo).setSelectedItem("definitely-not-a-file.db"));
             settle(owner);
+            JComboBox<?> dbFileComboAfter = (JComboBox<?>) jdbc.getDbFileComboComponent();
+            final Object[] committed = new Object[1];
+            SwingUtilities.invokeAndWait(() -> {
+                committed[0] = ((JTextField) dbFileComboAfter.getEditor().getEditorComponent()).getText();
+            });
+            assertEquals("definitely-not-a-file.db", committed[0],
+                    "the committed DB-file value must show in the editor");
             Color dirtyColor = editor0.getForeground();
             assertEquals(GuiColors.getUnsaved(), dirtyColor,
-                    "the dirty profile select editor must carry the unsaved color before the font change");
+                    "the dirty DB-file select editor must carry the unsaved color before the font change");
 
             // The JDBC preview (a plain text field) must keep its color too.
             JTextField preview = findFirstTextField(jdbcPanel);
@@ -149,12 +190,12 @@ class NodeConfigurationPanelFontChangeColorTest {
                             "a font-only UI refresh must preserve each value's GUIColors state color");
                 }
 
-                JComboBox<?> combo1 = findProfileCombo(jdbcPanel);
+                JComboBox<?> combo1 = (JComboBox<?>) jdbc.getDbFileComboComponent();
                 JTextField editor1 = (JTextField) combo1.getEditor().getEditorComponent();
                 assertNotEquals(editor0, editor1,
                         "the font change must have recreated the combo editor (this is what loses the color)");
                 assertEquals(dirtyColor, editor1.getForeground(),
-                        "the RECREATED profile select editor must keep the dirty-state color after the font change");
+                        "the RECREATED DB-file select editor must keep the dirty-state color after the font change");
                 assertEquals(before.getSize() + 3, editor1.getFont().getSize(),
                         "the font change must have actually been applied to the editor");
 
@@ -166,7 +207,7 @@ class NodeConfigurationPanelFontChangeColorTest {
                 assertEquals(SENTINEL, editor1.getForeground());
                 SwingUtilities.invokeAndWait(panel::updateUI);
                 settle(owner);
-                JComboBox<?> combo2 = findProfileCombo(jdbcPanel);
+                JComboBox<?> combo2 = (JComboBox<?>) jdbc.getDbFileComboComponent();
                 JTextField editor2 = (JTextField) combo2.getEditor().getEditorComponent();
                 assertEquals(dirtyColor, editor2.getForeground(),
                         "a UI refresh must re-apply the value-state color to the (new) editor");
@@ -176,6 +217,10 @@ class NodeConfigurationPanelFontChangeColorTest {
                 assertEquals(previewColor, preview1.getForeground(),
                         "the JDBC preview field must keep its color across the font change");
             } finally {
+                // A final layout pass sizes the font change's recreated (shown
+                // but not yet sized) combo editors — the forced validate() is
+                // load-bearing: the UI update below queries their max size.
+                settle(owner);
                 SwingUtilities.invokeAndWait(() -> AppearanceModule.updateCommonFontKeys(before));
                 SwingUtilities.updateComponentTreeUI(owner);
             }
@@ -183,6 +228,8 @@ class NodeConfigurationPanelFontChangeColorTest {
             SwingUtilities.invokeAndWait(owner::dispose);
             if (!propsExisted)
                 Files.deleteIfExists(props);
+            if (dbDirCreated)
+                Files.deleteIfExists(dbDir);
         }
     }
 
@@ -208,26 +255,6 @@ class NodeConfigurationPanelFontChangeColorTest {
                     ((JComponent) combo.getEditor().getEditorComponent()).getForeground()));
         }
         return snapshots;
-    }
-
-    /** The visible editable combo inside the JDBC panel (the Profile select in linked mode). */
-    private static JComboBox<?> findProfileCombo(JComponent jdbcPanel) throws Exception {
-        final JComboBox<?>[] out = new JComboBox<?>[1];
-        SwingUtilities.invokeAndWait(() -> findCombo(jdbcPanel, out));
-        return out[0];
-    }
-
-    private static void findCombo(Component c, JComboBox<?>[] out) {
-        if (out[0] != null)
-            return;
-        if (c instanceof JComboBox<?> cb && cb.isVisible() && cb.isEditable()) {
-            out[0] = cb;
-            return;
-        }
-        if (c instanceof Container cont) {
-            for (Component k : cont.getComponents())
-                findCombo(k, out);
-        }
     }
 
     private static JTextField findFirstTextField(JComponent jdbcPanel) throws Exception {
@@ -298,7 +325,7 @@ class NodeConfigurationPanelFontChangeColorTest {
     private static void findRow(Component c, JComponent[] out) {
         if (c instanceof Container cc) {
             for (Component inner : cc.getComponents())
-                if (inner instanceof JCheckBox cb && "Linked Database Profile".equals(cb.getText())) {
+                if (inner instanceof LinkedDbModeSelector) {
                     if (cc.getLayout() != null
                             && cc.getLayout().getClass().getSimpleName().startsWith("Mig"))
                         out[0] = (JComponent) cc;
@@ -339,12 +366,12 @@ class NodeConfigurationPanelFontChangeColorTest {
         }
     }
 
-    private static JCheckBox findCheckbox(JComponent wrapper) throws Exception {
-        JCheckBox[] out = new JCheckBox[1];
+    private static LinkedDbModeSelector findSelector(JComponent wrapper) throws Exception {
+        LinkedDbModeSelector[] out = new LinkedDbModeSelector[1];
         SwingUtilities.invokeAndWait(() -> {
             for (Component c : wrapper.getComponents())
-                if (c instanceof JCheckBox cb && "Linked Database Profile".equals(cb.getText()))
-                    out[0] = cb;
+                if (c instanceof LinkedDbModeSelector sel)
+                    out[0] = sel;
         });
         return out[0];
     }

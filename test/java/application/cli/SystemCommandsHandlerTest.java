@@ -48,15 +48,16 @@ class SystemCommandsHandlerTest {
     }
 
     @Test
-    @DisplayName("sys.profiles excludes reserved names")
-    void profilesExcludesReserved() throws Exception {
+    @DisplayName("sys.profiles lists all profiles (2-layer: no reserved names)")
+    void profilesListsAll() throws Exception {
         createNodeProfile("node-default");
         createNodeProfile("custom");
 
         String joined = String.join("\n",
                 new SystemCommandsHandler("profiles", registry).handle(ctx(List.of())).out());
 
-        assertFalse(joined.contains("node-default"));
+        assertTrue(joined.contains("node-default"),
+                "in the 2-layer model, formerly reserved names are regular profiles");
         assertTrue(joined.contains("custom"));
     }
 

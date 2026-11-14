@@ -149,8 +149,9 @@ class NodeConfigurationPanelDatabaseAutoLinkTest {
                 }
             });
             Object useProfileCheck = ((javax.swing.JComponent) wrapperRef[0]).getClientProperty("useProfileCheck");
-            assertTrue(useProfileCheck instanceof JCheckBox && ((JCheckBox) useProfileCheck).isSelected(),
-                    "the Linked Database Profile checkbox must be selected");
+            assertTrue(useProfileCheck instanceof LinkedDbModeSelector
+                            && ((LinkedDbModeSelector) useProfileCheck).isLinkedMode(),
+                    "the Linked Database Profile radio must be selected");
 
             // the unified JDBC panel is in linked mode, resolved to the
             // matching applied profile, and materializes its JDBC URL
@@ -170,10 +171,13 @@ class NodeConfigurationPanelDatabaseAutoLinkTest {
 
             // The file-based assignment is derivable from the properties
             // alone, so it must NOT be persisted to the node profile metadata
-            // (server-engine links are the only ones persisted).
+            // (server-engine links are the only ones persisted). The check is
+            // scoped to THIS profile: pre-existing links of other profiles in
+            // the workspace metadata are not this test's concern.
             String meta = Files.exists(NODE_PROFILES_META) ? Files.readString(NODE_PROFILES_META) : "";
-            assertFalse(meta.contains("\"databaseProfileLink\""),
-                    "a SQLite assignment is derived from the properties and must not be persisted");
+            assertFalse(meta.contains("\"" + PROFILE + "\""),
+                    "a SQLite assignment is derived from the properties and must not be persisted "
+                            + "(the profile must not gain a metadata entry)");
         } finally {
             SwingUtilities.invokeAndWait(() -> {
                 JFrame owner = ownerRef.get();
@@ -431,7 +435,7 @@ class NodeConfigurationPanelDatabaseAutoLinkTest {
                 throw new RuntimeException(e);
             }
         });
-        return out[0] instanceof JCheckBox && ((JCheckBox) out[0]).isSelected();
+        return out[0] instanceof LinkedDbModeSelector && ((LinkedDbModeSelector) out[0]).isLinkedMode();
     }
 
     /** The DB.Url of the applied baseline (the on-disk state the node runs with). */

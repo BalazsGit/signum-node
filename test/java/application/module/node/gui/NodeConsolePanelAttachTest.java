@@ -6,11 +6,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.nio.file.Paths;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import application.module.logging.context.NodeLoggingContextManager;
 import application.module.node.Signum;
@@ -35,6 +35,8 @@ import application.module.node.profile.NodeProfile;
 class NodeConsolePanelAttachTest {
 
     private static int profileSeq = 0;
+
+    @TempDir static java.nio.file.Path confRoot;
 
     private static String newProfileName() {
         return "attach-test-" + (profileSeq++);
@@ -100,7 +102,7 @@ class NodeConsolePanelAttachTest {
         String profileName = newProfileName();
         NodeProfile profile = new NodeProfile(profileName);
         NodeConsolePanel panel = new NodeConsolePanel(null, profile);
-        Signum signum = new Signum(new NodeProfile(profileName), Paths.get("./conf"));
+        Signum signum = new Signum(new NodeProfile(profileName), confRoot);
         panel.setSignum(signum);
 
         // Idempotent double attach
@@ -121,7 +123,7 @@ class NodeConsolePanelAttachTest {
         String profileName = newProfileName();
         NodeProfile profile = new NodeProfile(profileName);
         NodeConsolePanel panel = new NodeConsolePanel(null, profile);
-        Signum signum = new Signum(new NodeProfile(profileName), Paths.get("./conf"));
+        Signum signum = new Signum(new NodeProfile(profileName), confRoot);
         panel.setSignum(signum);
 
         // Log BEFORE the console attached its subscriber (startup output).
@@ -160,7 +162,7 @@ class NodeConsolePanelAttachTest {
         NodeConsolePanel panel = new NodeConsolePanel(null, new NodeProfile(profileName));
 
         // First lifecycle: attach + a delivered event.
-        Signum first = new Signum(new NodeProfile(profileName), Paths.get("./conf"));
+        Signum first = new Signum(new NodeProfile(profileName), confRoot);
         panel.setSignum(first); // attaches → latch becomes true
         String m1 = "RESTART_M1_" + System.nanoTime();
         first.getProfileLogger().info(m1);
@@ -173,7 +175,7 @@ class NodeConsolePanelAttachTest {
         // Restart: a fresh Signum (fresh ProfileLogger) is adopted. Its startup log
         // (emitted before the console re-attaches) must be replayed — this only works
         // if the latch was cleared on STOPPED (otherwise the re-attach is a no-op).
-        Signum second = new Signum(new NodeProfile(profileName), Paths.get("./conf"));
+        Signum second = new Signum(new NodeProfile(profileName), confRoot);
         String m2 = "RESTART_M2_" + System.nanoTime();
         second.getProfileLogger().info(m2);
         panel.setSignum(second); // ensureProfileLoggerAttached → attaches to SECOND (latch was reset)
@@ -187,7 +189,7 @@ class NodeConsolePanelAttachTest {
     void tabMove_logFeedStaysContinuous() throws InterruptedException {
         String profileName = newProfileName();
         NodeConsolePanel panel = new NodeConsolePanel(null, new NodeProfile(profileName));
-        Signum signum = new Signum(new NodeProfile(profileName), Paths.get("./conf"));
+        Signum signum = new Signum(new NodeProfile(profileName), confRoot);
         panel.setSignum(signum);
 
         // A pre-move event must arrive (attach works).
@@ -218,7 +220,7 @@ class NodeConsolePanelAttachTest {
         String profileName = newProfileName();
         NodeProfile profile = new NodeProfile(profileName);
         NodeConsolePanel panel = new NodeConsolePanel(null, profile);
-        Signum signum = new Signum(new NodeProfile(profileName), Paths.get("./conf"));
+        Signum signum = new Signum(new NodeProfile(profileName), confRoot);
         try {
             // 3 REPLAY events: logged to the bus BEFORE the console subscribes (startup
             // output). They sit in the ProfileLogger replay ring and are delivered when

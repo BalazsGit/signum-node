@@ -168,14 +168,14 @@ class NodeConfigurationPanelRowSeparatorTest {
     }
 
     /**
-     * The row wrapper: the container that directly holds the "Linked
-     * Database Profile" checkbox (searched at any depth — the tab page sits
+     * The row wrapper: the container that directly holds the database-URL
+     * source selector (searched at any depth — the tab page sits
      * inside JScrollPane -> JViewport).
      */
     private static void findWrapper(Component c, JComponent[] out) {
         if (c instanceof Container cc) {
             for (Component inner : cc.getComponents())
-                if (inner instanceof javax.swing.JCheckBox cb && "Linked Database Profile".equals(cb.getText())) {
+                if (inner instanceof LinkedDbModeSelector) {
                     out[0] = (JComponent) cc;
                     return;
                 }

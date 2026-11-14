@@ -39,7 +39,7 @@ import org.junit.jupiter.api.Test;
  * The test drives the panel on the EDT: it selects the filter, asserts that
  * every listed row is dirty, then edits one clean text field and asserts the
  * list grows by exactly that row (and shrinks back when the edit is undone).
- * A second test verifies that with all three boxes selected and an empty
+ * A second test verifies that with all four boxes selected and an empty
  * query nothing is filtered (the tabbed view stays up).
  * </p>
  */
@@ -241,9 +241,13 @@ class NodeConfigurationPanelUnsavedFilterTest {
             SwingUtilities.invokeAndWait(() -> {
                 try {
                     JCheckBox unsaved = (JCheckBox) readDeclaredField(panelRef[0], "showUnsavedBox");
+                    JCheckBox unsavedApplied =
+                            (JCheckBox) readDeclaredField(panelRef[0], "showUnsavedAppliedBox");
                     JCheckBox saved = (JCheckBox) readDeclaredField(panelRef[0], "showSavedBox");
                     JCheckBox applied = (JCheckBox) readDeclaredField(panelRef[0], "showAppliedBox");
                     assertTrue(unsaved.isSelected(), "the unsaved box must be selected by default");
+                    assertTrue(unsavedApplied.isSelected(),
+                            "the unsaved-applied box must be selected by default");
                     assertTrue(saved.isSelected(), "the saved box must be selected by default");
                     assertTrue(applied.isSelected(), "the applied box must be selected by default");
                     List<?> matches = (List<?>) readDeclaredField(panelRef[0], "searchMatches");
@@ -420,6 +424,7 @@ class NodeConfigurationPanelUnsavedFilterTest {
 
         // 3. A real query IS a search: counter and chevrons come back.
         setCheckboxSelected(panel, "showSavedBox", true);
+        setCheckboxSelected(panel, "showUnsavedAppliedBox", true);
         setCheckboxSelected(panel, "showAppliedBox", true);
         field.setText("Enable");
         if (indicator.getText().isEmpty() || !indicator.isVisible()) {
@@ -447,6 +452,7 @@ class NodeConfigurationPanelUnsavedFilterTest {
      */
     private List<Object> selectFilterAndReadMatches(Object panel, boolean select) throws Exception {
         setCheckboxSelected(panel, "showUnsavedBox", select);
+        setCheckboxSelected(panel, "showUnsavedAppliedBox", false);
         setCheckboxSelected(panel, "showSavedBox", !select);
         setCheckboxSelected(panel, "showAppliedBox", !select);
         return readMatches(panel);

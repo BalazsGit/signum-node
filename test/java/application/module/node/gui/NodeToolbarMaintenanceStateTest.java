@@ -6,13 +6,13 @@ import application.module.node.profile.NodeProfile;
 import application.module.node.util.Listener;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import javax.swing.JLabel;
 import javax.swing.SwingUtilities;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
-import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -33,6 +33,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class NodeToolbarMaintenanceStateTest {
 
     private static final String PROFILE = "toolbar-maintenance-test";
+
+    @TempDir static java.nio.file.Path confRoot;
 
     /**
      * Headless stand-in for BlockchainProcessor: configurable
@@ -118,7 +120,7 @@ class NodeToolbarMaintenanceStateTest {
     }
 
     private static Signum signumWith(BlockchainProcessor processor) throws Exception {
-        Signum signum = new Signum(new NodeProfile(PROFILE), Paths.get("./conf"));
+        Signum signum = new Signum(new NodeProfile(PROFILE), confRoot);
         Field f = Signum.class.getDeclaredField("blockchainProcessor");
         f.setAccessible(true);
         f.set(signum, processor);

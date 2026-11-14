@@ -16,13 +16,13 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Unit tests for the layered (L0 &larr; L1 &larr; L2) effective node
+ * Unit tests for the two-layer (L0 &larr; L2) effective node
  * properties loading — see {@link EffectiveNodeProps}.
  * <p>
  * Uses an explicit conf-root sandbox (a JUnit {@link TempDir}) so the tests
  * never touch the real {@code conf/} tree. Follows AAA + JUnit 5 conventions.
  */
-@DisplayName("EffectiveNodeProps layered loading Tests")
+@DisplayName("EffectiveNodeProps two-layer loading Tests")
 class EffectiveNodePropsTest {
 
     @TempDir
@@ -32,7 +32,7 @@ class EffectiveNodePropsTest {
         return tempDir.resolve("node").resolve("profiles");
     }
 
-    private void writeLayer(String fileName, String content) throws IOException {
+    private void writeProfile(String fileName, String content) throws IOException {
         Files.createDirectories(profilesDir());
         try (Writer writer = Files.newBufferedWriter(profilesDir().resolve(fileName),
                 StandardCharsets.UTF_8)) {
@@ -40,18 +40,30 @@ class EffectiveNodePropsTest {
         }
     }
 
+    // ── loadEffective (L2 only) ────────────────────────────────────────
+
     @Test
-    @DisplayName("no layers at all -> empty effective properties (pure L0 fallback)")
-    void noLayers_ReturnsEmptyProperties() {
+    @DisplayName("no profile file -> empty effective properties (pure L0 fallback)")
+    void noProfileFile_ReturnsEmptyProperties() {
         CaselessProperties result = EffectiveNodeProps.loadEffective(tempDir.toString(), "mainnet");
 
         assertTrue(result.isEmpty());
     }
 
     @Test
-    @DisplayName("user L1 layer (default.properties) active lines are loaded; comments are ignored")
-    void defaultTemplateActiveLines_AreLoaded() throws IOException {
-        writeLayer("default.properties",
+    @DisplayName("profile file (L2) active lines are loaded")
+    void profileFileActiveLines_AreLoaded() throws IOException {
+        writeProfile("mainnet.properties", "API.Port=9100\n");
+
+        CaselessProperties result = EffectiveNodeProps.loadEffective(tempDir.toString(), "mainnet");
+
+        assertEquals("9100", result.getProperty("API.Port"));
+    }
+
+    @Test
+    @DisplayName("profile file comments are ignored")
+    void profileFileComments_AreIgnored() throws IOException {
+        writeProfile("mainnet.properties",
                 "# a fully commented template line\n"
                         + "API.Port=9001\n"
                         + "# DB.Url=jdbc:sqlite:file:./db/x.sqlite.db\n");
@@ -63,9 +75,9 @@ class EffectiveNodePropsTest {
     }
 
     @Test
-    @DisplayName("profile file (L2) active lines are loaded")
-    void profileFileActiveLines_AreLoaded() throws IOException {
-        writeLayer("mainnet.properties", "API.Port=9100\n");
+    @DisplayName("keys are case-insensitive in the profile file")
+    void keysAreCaseInsensitive() throws IOException {
+        writeProfile("mainnet.properties", "api.port=9100\n");
 
         CaselessProperties result = EffectiveNodeProps.loadEffective(tempDir.toString(), "mainnet");
 
@@ -73,22 +85,11 @@ class EffectiveNodePropsTest {
     }
 
     @Test
-    @DisplayName("the profile file overrides the default template per key; non-conflicting L1 keys survive")
-    void profileOverridesDefaultTemplate_PerKey() throws IOException {
-        writeLayer("default.properties", "API.Port=9001\nnode.blockTime=120\n");
-        writeLayer("mainnet.properties", "API.Port=9002\n");
-
-        CaselessProperties result = EffectiveNodeProps.loadEffective(tempDir.toString(), "mainnet");
-
-        assertEquals("9002", result.getProperty("API.Port"), "L2 must win on the conflicting key");
-        assertEquals("120", result.getProperty("node.blockTime"), "non-conflicting L1 key must survive");
-    }
-
-    @Test
-    @DisplayName("fully commented layers contribute nothing")
-    void fullyCommentedLayers_ContributeNothing() throws IOException {
-        writeLayer("default.properties", "# API.Port=9001\n# DB.Url=jdbc:sqlite:file:./db/x.sqlite.db\n");
-        writeLayer("mainnet.properties", "# node.blockTime=120\n");
+    @DisplayName("fully commented profile file contributes nothing")
+    void fullyCommentedProfile_ContributesNothing() throws IOException {
+        writeProfile("mainnet.properties",
+                "# API.Port=9001\n"
+                        + "# node.blockTime=120\n");
 
         CaselessProperties result = EffectiveNodeProps.loadEffective(tempDir.toString(), "mainnet");
 
@@ -96,32 +97,32 @@ class EffectiveNodePropsTest {
     }
 
     @Test
-    @DisplayName("keys are case-insensitive across layers")
-    void keysAreCaseInsensitive_AcrossLayers() throws IOException {
-        writeLayer("default.properties", "Node.ApiPort=9001\n");
-        writeLayer("mainnet.properties", "node.apiport=9002\n");
+    @DisplayName("the former L1 file (default.properties) is NOT loaded as a layer")
+    void defaultPropertiesFile_NotLoadedAsLayer() throws IOException {
+        writeProfile("default.properties", "API.Port=9001\n");
 
         CaselessProperties result = EffectiveNodeProps.loadEffective(tempDir.toString(), "mainnet");
 
-        assertEquals("9002", result.getProperty("NODE.APIPORT"));
+        assertTrue(result.isEmpty(),
+                "the former L1 file must not contribute active lines in the 2-layer model");
     }
 
     @Test
-    @DisplayName("a reserved profile name loads the L1 layer only (no double-load of itself)")
-    void reservedProfileName_LoadsL1Only() throws IOException {
-        writeLayer("default.properties", "API.Port=9001\n");
+    @DisplayName("the reference-only node-default template is not loaded as a layer")
+    void legacyTemplateActiveLines_NotLoaded() throws IOException {
+        writeProfile("node-default.properties", "API.Port=9001\n");
 
-        CaselessProperties result = EffectiveNodeProps.loadEffective(tempDir.toString(), "default");
+        CaselessProperties result = EffectiveNodeProps.loadEffective(tempDir.toString(), "mainnet");
 
-        assertEquals("9001", result.getProperty("API.Port"));
-        assertEquals(1, result.size(), "the L1 layer must not be loaded twice");
+        assertTrue(result.isEmpty(),
+                "the reference-only template must not contribute active lines");
     }
 
-    // ── GUI baseline (effective L0 <- L1) ────────────────────────────────
+    // ── GUI baseline (L0 only in 2-layer) ──────────────────────────────
 
     @Test
-    @DisplayName("baseline without a template -> the hardcoded L0 default in String form")
-    void baseline_NoTemplate_ReturnsL0Default() {
+    @DisplayName("baseline always returns the hardcoded L0 default")
+    void baseline_ReturnsL0Default() {
         assertEquals("8888", EffectiveNodeProps.baselineValue(tempDir.toString(), "API.Port", 8888));
         assertEquals("true", EffectiveNodeProps.baselineValue(tempDir.toString(), "node.enabled", true));
     }
@@ -133,52 +134,11 @@ class EffectiveNodePropsTest {
     }
 
     @Test
-    @DisplayName("baseline with an active template line -> L1 overrides L0 for every profile")
-    void baseline_ActiveTemplateLine_OverridesL0() throws IOException {
-        writeLayer("default.properties", "# documented default\nAPI.Port=9001\n");
+    @DisplayName("baseline is not affected by any on-disk file")
+    void baseline_NotAffectedByProfileFile() throws IOException {
+        writeProfile("node.properties", "API.Port=9001\n");
 
-        assertEquals("9001", EffectiveNodeProps.baselineValue(tempDir.toString(), "API.Port", 8888));
-        assertEquals("8889", EffectiveNodeProps.baselineValue(tempDir.toString(), "node.other", "8889"),
-                "non-overridden keys must keep their L0 value");
-    }
-
-    @Test
-    @DisplayName("a template line without a value is not an override -> L0 stays effective")
-    void baseline_EmptyTemplateLine_FallsBackToL0() throws IOException {
-        writeLayer("default.properties", "API.Port=\n");
-
-        assertEquals("8888", EffectiveNodeProps.baselineValue(tempDir.toString(), "API.Port", 8888));
-    }
-
-    @Test
-    @DisplayName("baseline keys are case-insensitive")
-    void baseline_KeysAreCaseInsensitive() throws IOException {
-        writeLayer("default.properties", "node.blocktime=120\n");
-
-        assertEquals("120", EffectiveNodeProps.baselineValue(tempDir.toString(), "Node.BlockTime", "45"));
-    }
-
-    @Test
-    @DisplayName("a template change on disk is picked up (fingerprint-based cache invalidation)")
-    void baseline_TemplateChangedOnDisk_IsPickedUp() throws IOException {
-        writeLayer("default.properties", "API.Port=9001\n");
-        assertEquals("9001", EffectiveNodeProps.baselineValue(tempDir.toString(), "API.Port", 8888));
-
-        // The comment changes the file size, so the fingerprint must change
-        // even when the modification time rounds to the same millisecond.
-        writeLayer("default.properties", "API.Port=9002\n# template edited\n");
-        assertEquals("9002", EffectiveNodeProps.baselineValue(tempDir.toString(), "API.Port", 8888),
-                "the cached template must be re-read once the file changed");
-    }
-
-    @Test
-    @DisplayName("the reference-only node-default template is no longer loaded as L1")
-    void legacyTemplateActiveLines_NoLongerEffective() throws IOException {
-        writeLayer("node-default.properties", "API.Port=9001\n");
-
-        CaselessProperties result = EffectiveNodeProps.loadEffective(tempDir.toString(), "mainnet");
-
-        assertTrue(result.isEmpty(),
-                "the reference-only template must not contribute active lines anymore");
+        assertEquals("8888", EffectiveNodeProps.baselineValue(tempDir.toString(), "API.Port", 8888),
+                "the baseline is the L0 default, not the profile file value");
     }
 }

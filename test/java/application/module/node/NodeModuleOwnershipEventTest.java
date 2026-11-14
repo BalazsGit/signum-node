@@ -6,6 +6,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -32,7 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class NodeModuleOwnershipEventTest {
 
     private static final String NAME_A = "ownership-a-" + System.nanoTime();
-    private static final java.nio.file.Path CONF = java.nio.file.Paths.get("./conf");
+    @TempDir static java.nio.file.Path CONF;
 
     private NodeModule module() {
         return NodeModule.getInstance();

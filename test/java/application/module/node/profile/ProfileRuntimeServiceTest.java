@@ -5,6 +5,7 @@ import application.module.logging.LoggingProfileRepository;
 import application.module.node.NodeModule;
 import application.module.node.Signum;
 import application.utils.config.ModuleIds;
+import application.utils.io.PathUtils;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -148,14 +149,19 @@ class ProfileRuntimeServiceTest {
     }
 
     @Test
-    @DisplayName("rejects a reserved name")
-    void clone_ReservedName_Throws() throws IOException {
+    @DisplayName("accepts formerly reserved names as clone targets (2-layer)")
+    void clone_FormerlyReservedName_Allowed() throws IOException {
         // Arrange
         createSourceProfile();
 
-        // Act / Assert
-        assertThrows(IllegalArgumentException.class,
-                () -> ProfileRuntimeService.cloneProfile(confRoot(), "mainnet", "node-default", new Properties()));
+        // Act
+        ProfileRuntimeService.cloneProfile(confRoot(), "mainnet", "node-default", new Properties());
+
+        // Assert
+        assertTrue(Files.exists(PathUtils.resolvePath(confRoot())
+                .resolve(ModuleIds.NODE)
+                .resolve(ModuleIds.CATEGORY_PROFILES)
+                .resolve("node-default.properties")));
     }
 
     @Test
@@ -346,7 +352,7 @@ class ProfileRuntimeServiceTest {
     }
 
     @Test
-    @DisplayName("rename rejects a duplicate, reserved, or invalid new name")
+    @DisplayName("rename rejects a duplicate or invalid new name")
     void rename_InvalidNewName_Throws() throws IOException {
         // Arrange
         NodeProfileRepository.createProfile(confRoot(), "mainnet", new Properties());
@@ -355,8 +361,6 @@ class ProfileRuntimeServiceTest {
         // Act / Assert
         assertThrows(IllegalArgumentException.class,
                 () -> ProfileRuntimeService.renameProfile(confRoot(), "mainnet", "taken", null));
-        assertThrows(IllegalArgumentException.class,
-                () -> ProfileRuntimeService.renameProfile(confRoot(), "mainnet", "node-default", null));
         assertThrows(IllegalArgumentException.class,
                 () -> ProfileRuntimeService.renameProfile(confRoot(), "mainnet", "bad name!", null));
     }
@@ -691,11 +695,13 @@ class ProfileRuntimeServiceTest {
     }
 
     @Test
-    @DisplayName("createEmpty rejects a reserved name")
-    void createEmpty_ReservedName_Throws() {
-        // Act / Assert
-        assertThrows(IllegalArgumentException.class,
-                () -> ProfileRuntimeService.createEmptyProfile(confRoot(), "node-default"));
+    @DisplayName("createEmpty accepts formerly reserved names (2-layer)")
+    void createEmpty_FormerlyReservedName_Allowed() throws IOException {
+        ProfileRuntimeService.createEmptyProfile(confRoot(), "node-default");
+        assertTrue(Files.exists(PathUtils.resolvePath(confRoot())
+                .resolve(ModuleIds.NODE)
+                .resolve(ModuleIds.CATEGORY_PROFILES)
+                .resolve("node-default.properties")));
     }
 
     @Test

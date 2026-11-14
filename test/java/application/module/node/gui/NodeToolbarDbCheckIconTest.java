@@ -7,6 +7,7 @@ import application.module.node.util.Listener;
 import application.utils.gui.GuiColors;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import javax.swing.Icon;
 import javax.swing.JButton;
@@ -29,6 +30,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class NodeToolbarDbCheckIconTest {
 
     private static final String PROFILE = "toolbar-dbcheck-icon-test";
+
+    @TempDir static java.nio.file.Path confRoot;
 
     static final class FakeProcessor {
         final AtomicReference<BlockchainProcessor.ConsistencyState> consistency =
@@ -99,7 +102,7 @@ class NodeToolbarDbCheckIconTest {
     }
 
     private static Signum signumWith(BlockchainProcessor processor) throws Exception {
-        Signum signum = new Signum(new NodeProfile(PROFILE), java.nio.file.Paths.get("./conf"));
+        Signum signum = new Signum(new NodeProfile(PROFILE), confRoot);
         java.lang.reflect.Field f = Signum.class.getDeclaredField("blockchainProcessor");
         f.setAccessible(true);
         f.set(signum, processor);

@@ -78,21 +78,16 @@ class LoggingPathsTest {
     }
 
     @Test
-    @DisplayName("SSOT constants: ModuleIds.SYSTEM + CATEGORY_LOGGING_RUNTIME + reserved system-default")
+    @DisplayName("SSOT constants: ModuleIds.SYSTEM + CATEGORY_LOGGING_RUNTIME")
     void ssotConstants() {
         assertEquals("system", ModuleIds.SYSTEM);
         assertEquals("runtime", ModuleIds.CATEGORY_LOGGING_RUNTIME);
-        assertTrue(ReservedNames.isLoggingReservedName("system-default"),
-                "system-default must be a reserved logging profile name");
         assertFalse(ReservedNames.isLoggingReservedName("my-profile"));
     }
 
     @Test
-    @DisplayName("the system classpath resources (L1 seed + template) are present")
+    @DisplayName("the system classpath resource (template) is present")
     void classpathResourcesExist() {
-        assertFalse(LoggingPaths.class.getResource(LoggingPaths.SYSTEM_L1_RESOURCE) == null,
-                "the system L1 seed resource must exist on the classpath: "
-                        + LoggingPaths.SYSTEM_L1_RESOURCE);
         assertFalse(LoggingPaths.class.getResource(LoggingPaths.SYSTEM_TEMPLATE_RESOURCE) == null,
                 "the system template resource must exist on the classpath: "
                         + LoggingPaths.SYSTEM_TEMPLATE_RESOURCE);

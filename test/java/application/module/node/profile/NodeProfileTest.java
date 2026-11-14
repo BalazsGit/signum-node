@@ -31,23 +31,11 @@ class NodeProfileTest {
     class IsReservedProfileNameTests {
 
         @Test
-        @DisplayName("returns true for 'node-default' reserved profile name")
-        void isReservedProfileName_GivenNodeDefault_ReturnsTrue() {
-            boolean result = NodeProfileRepository.isReservedProfileName("node-default");
-            assertTrue(result);
-        }
-
-        @Test
-        @DisplayName("returns true for 'logging-default' reserved profile name")
-        void isReservedProfileName_GivenLoggingDefault_ReturnsTrue() {
-            boolean result = NodeProfileRepository.isReservedProfileName("logging-default");
-            assertTrue(result);
-        }
-
-        @Test
-        @DisplayName("returns true for the 'default' reserved profile name (the user-editable L1 layer)")
-        void isReservedProfileName_GivenDefault_ReturnsTrue() {
-            assertTrue(NodeProfileRepository.isReservedProfileName("default"));
+        @DisplayName("returns false for formerly reserved names (2-layer: no reserved names)")
+        void isReservedProfileName_FormerlyReserved_ReturnsFalse() {
+            assertFalse(NodeProfileRepository.isReservedProfileName("node-default"));
+            assertFalse(NodeProfileRepository.isReservedProfileName("logging-default"));
+            assertFalse(NodeProfileRepository.isReservedProfileName("default"));
         }
 
         @Test

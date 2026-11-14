@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 /**
- * Unit tests for the three-layer (L0 &larr; L1 &larr; L2) merge of
+ * Unit tests for the two-layer (L0 &larr; L2) merge of
  * {@link ConfigurationUtils#loadEffectiveLoggerProfile(String, String)}.
  * <p>
  * Uses an explicit conf-root sandbox (a JUnit {@link TempDir}) so the tests
@@ -37,28 +37,31 @@ class ConfigurationUtilsLoadEffectiveLoggerProfileTest {
     }
 
     @Test
-    @DisplayName("an empty shared logging.properties no longer preempts the L1 layer's active lines")
-    void emptySharedFile_doesNotPreemptReservedDefault() throws IOException {
+    @DisplayName("an empty shared logging.properties means pure L0 (no L1 layer exists)")
+    void emptySharedFile_meansPureL0() throws IOException {
         writeLoggingFile("logging", ""); // the build-created empty L2 file
-        writeLoggingFile("default", "node.level = FINE\n");
+        writeLoggingFile("default", "node.level = FINE\n"); // on-disk file, but NOT a layer
 
         LoggerProfile result = ConfigurationUtils.loadEffectiveLoggerProfile(tempDir.toString(), "logging");
 
-        assertEquals("FINE", result.getProperties().getProperty("node.level"),
-                "the L1 layer's active lines must survive an empty shared file");
+        assertEquals("INFO", result.getProperties().getProperty("node.level"),
+                "with an empty L2 file the hardcoded L0 default (node.level=INFO) must be effective; "
+                        + "the on-disk default.properties is not a layer in the 2-layer architecture");
     }
 
     @Test
-    @DisplayName("the shared logging.properties (L2) overrides the reserved default file (L1)")
-    void sharedFileOverridesReservedDefault() throws IOException {
-        writeLoggingFile("default", "node.level = FINE\n.level = SEVERE\n");
+    @DisplayName("the shared logging.properties (L2) provides effective values; keys not in L2 fall to L0")
+    void sharedFileProvidesEffectiveValues_fallsToL0ForMissingKeys() throws IOException {
+        writeLoggingFile("default", "node.level = FINE\norg.eclipse.jetty.level = FINE\n"); // on-disk file, not a layer
         writeLoggingFile("logging", "node.level = SEVERE\n");
 
         LoggerProfile result = ConfigurationUtils.loadEffectiveLoggerProfile(tempDir.toString(), "logging");
 
-        assertEquals("SEVERE", result.getProperties().getProperty("node.level"));
-        assertEquals("SEVERE", result.getProperties().getProperty(".level"),
-                "non-conflicting L1 keys must survive the L2 merge");
+        assertEquals("SEVERE", result.getProperties().getProperty("node.level"),
+                "the L2 value must be effective");
+        assertEquals("OFF", result.getProperties().getProperty("org.eclipse.jetty.level"),
+                "keys not in L2 fall to the L0 default (org.eclipse.jetty.level=OFF), not to the on-disk "
+                        + "default.properties (which is not a layer)");
     }
 
     @Test
@@ -68,8 +71,12 @@ class ConfigurationUtilsLoadEffectiveLoggerProfileTest {
 
         LoggerProfile result = ConfigurationUtils.loadEffectiveLoggerProfile(tempDir.toString(), "logging");
 
-        assertEquals("java.util.logging.ConsoleHandler",
-                result.getProperties().getProperty("handlers"), "L0 default must be present");
+        // F0-F4 (log4j2): the JUL L0 defaults (handlers=java.util.logging.ConsoleHandler, .level,
+        // ConsoleHandler.level/formatter) were removed from LoggerProfile.applyInternalDefaults();
+        // the L0 layer is now log4j2 *.level keys. Verify one of those stays effective with no L1 file.
+        assertEquals("OFF",
+                result.getProperties().getProperty("org.eclipse.jetty.level"),
+                "L0 default must be present (no L1 file -> the hardcoded L0 stays effective)");
         assertEquals("SEVERE", result.getProperties().getProperty("node.level"));
     }
 
@@ -86,7 +93,7 @@ class ConfigurationUtilsLoadEffectiveLoggerProfileTest {
         Files.delete(loggingFile("verbose"));
         LoggerProfile shared = ConfigurationUtils.loadEffectiveLoggerProfile(tempDir.toString(), "verbose");
         assertEquals("WARNING", shared.getProperties().getProperty("node.level"),
-                "the missing named profile must fall back to the shared file (which still overrides L1)");
+                "the missing named profile must fall back to the shared file (L2)");
     }
 
     @Test

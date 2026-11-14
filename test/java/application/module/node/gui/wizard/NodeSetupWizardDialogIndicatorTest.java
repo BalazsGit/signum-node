@@ -1,5 +1,7 @@
 package application.module.node.gui.wizard;
 
+import application.module.node.gui.wizard.steps.DatabaseConnectionStep;
+import application.module.node.gui.wizard.steps.ProfileNameStep;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
@@ -10,26 +12,29 @@ import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JRadioButton;
+import javax.swing.JTextField;
 import application.utils.gui.GuiFontManager;
 import java.awt.Component;
 import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * GUI-level regression tests for the wizard's "Step X of Y" indicator.
  * <p>
- * Drives the REAL {@link NodeSetupWizardDialog} (all five step panels built,
+ * Drives the REAL {@link NodeSetupWizardDialog} (all six step panels built,
  * the controller live-bound to the shared context) and asserts that the
  * indicator follows the <b>visible</b> (auto-skip filtered) step sequence:
  * </p>
  * <ul>
- *   <li>SQLite (preselected) → 3 visible steps from the very first paint;</li>
- *   <li>clicking an engine radio updates the indicator <b>live</b> (5 ↔ 3)
+ *   <li>SQLite (preselected) → 5 visible steps from the very first paint;</li>
+ *   <li>clicking an engine radio updates the indicator <b>live</b> (6 ↔ 4)
  *       without any navigation;</li>
- *   <li>with SQLite, Back/Next walks exactly those 3 steps, numbered 1..3,
- *       in both directions.</li>
+ *   <li>with SQLite, Back/Next walks exactly those 5 steps, numbered 1..5,
+ *       in both directions (the SQLite database confirmation is hooked);</li>
+ *   <li>the title bar shows the profile name and the network live.</li>
  * </ul>
  */
 @DisplayName("NodeSetupWizardDialog step indicator (live, per-context)")
@@ -54,42 +59,104 @@ class NodeSetupWizardDialogIndicatorTest {
     }
 
     @Test
-    @DisplayName("the indicator is live: switching the engine radio updates 'Step 1 of N' immediately")
+    @DisplayName("the indicator is live: switching the engine radio updates 'Step X of N' immediately")
     void indicatorUpdatesLiveWithEngineSelection() {
         dialog = new NodeSetupWizardDialog(null, null);
+        hookExitConfirmation();
         // SQLite is preselected → the server-only installation step (and the summary)
         // are invisible from the start
-        assertEquals("Step 1 of 3 — Database", indicatorText());
+        assertEquals("Step 1 of 5 — Profile name", indicatorText());
+
+        // the network (decided in the first step) lives in the window header
+        // (next to the profile name) — the indicator stays network-free
+        findRadio("Testnet").doClick();
+        assertEquals("Step 1 of 5 — Profile name", indicatorText());
+        assertTrue(dialog.getTitle().contains("(testnet)"),
+                "the window title should carry the network: " + dialog.getTitle());
+
+        // Only the CURRENT step's controls live in the dialog tree (the step
+        // wrappers are swapped on navigation) — the engine radios sit on the
+        // database step: navigate there, then the indicator follows the engine
+        // selection live (no extra navigation) on the context change.
+        clickButton("Next");
+        assertEquals("Step 2 of 5 — Database", indicatorText());
 
         findRadio("MariaDB").doClick();
-        assertEquals("Step 1 of 5 — Database", indicatorText());
+        assertEquals("Step 2 of 7 — Database", indicatorText());
 
         findRadio("SQLite").doClick();
-        assertEquals("Step 1 of 3 — Database", indicatorText());
+        assertEquals("Step 2 of 5 — Database", indicatorText());
     }
 
     @Test
-    @DisplayName("with SQLite the wizard walks exactly 3 steps, back and forth")
-    void sqliteWalksExactlyThreeStepsBothWays() {
+    @DisplayName("with SQLite the wizard walks exactly 5 steps, back and forth")
+    void sqliteWalksExactlyFiveStepsBothWays() {
         dialog = new NodeSetupWizardDialog(null, null);
-        assertEquals("Step 1 of 3 — Database", indicatorText());
+        hookExitConfirmation();
+        assertEquals("Step 1 of 5 — Profile name", indicatorText());
         assertEquals("Next", findButton("Next").getText());
 
         clickButton("Next");
-        assertEquals("Step 2 of 3 — Database configuration", indicatorText());
+        assertEquals("Step 2 of 5 — Database", indicatorText());
 
         clickButton("Back");
-        assertEquals("Step 1 of 3 — Database", indicatorText());
+        assertEquals("Step 1 of 5 — Profile name", indicatorText());
 
         clickButton("Next");
-        assertEquals("Step 2 of 3 — Database configuration", indicatorText());
+        assertEquals("Step 2 of 5 — Database", indicatorText());
 
         clickButton("Next");
-        assertEquals("Step 3 of 3 — Node configuration", indicatorText());
+        assertEquals("Step 3 of 5 — Database configuration", indicatorText());
+
+        clickButton("Next"); // the SQLite database confirmation is hooked → proceeds
+        assertEquals("Step 4 of 5 — Node Profile configuration", indicatorText());
+        assertEquals("Next", findButton("Next").getText());
+
+        clickButton("Next"); // logging is the last visible step for SQLite
+        assertTrue(indicatorText().startsWith("Step 5 of 5"), "logging is the last visible step");
         assertEquals("Finish", findButton("Finish").getText());
 
         clickButton("Back");
-        assertEquals("Step 2 of 3 — Database configuration", indicatorText());
+        assertTrue(indicatorText().startsWith("Step 4 of 5"),
+                "back from the logging step returns to the node-configuration step");
+    }
+
+    @Test
+    @DisplayName("the title bar shows the profile name live (the custom name follows the typing)")
+    void titleBarShowsChosenNameLive() {
+        dialog = new NodeSetupWizardDialog(null, null);
+        hookExitConfirmation();
+        // The suggested name (resolved from the context) is shown from the start
+        assertTrue(dialog.getTitle().startsWith("Create Node Profile — "),
+                "the title bar should show the suggested name: " + dialog.getTitle());
+
+        findRadio("Custom name").doClick();
+        ProfileNameStep nameStep = null;
+        for (WizardStep s : dialog.getController().getSteps()) {
+            if (s instanceof ProfileNameStep p) {
+                nameStep = p;
+            }
+        }
+        List<Component> nameStepComponents = new ArrayList<>();
+        collectChildren(nameStep.getPanel(), nameStepComponents);
+        JTextField nameField = null;
+        for (Component c : nameStepComponents) {
+            if (c instanceof JTextField f && f.getColumns() == 24) {
+                nameField = f;
+                break;
+            }
+        }
+        nameField.setText("my-test-profile");
+        assertEquals("Create Node Profile — my-test-profile (mainnet)", dialog.getTitle());
+    }
+
+    /** Replaces the SQLite database step's exit confirmation (a real dialog would block the test). */
+    private void hookExitConfirmation() {
+        for (WizardStep s : dialog.getController().getSteps()) {
+            if (s instanceof DatabaseConnectionStep d) {
+                d.setExitConfirmationHook(() -> true);
+            }
+        }
     }
 
     // ── helpers ───────────────────────────────────────────────────────────

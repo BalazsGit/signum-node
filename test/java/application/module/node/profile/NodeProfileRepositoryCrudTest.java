@@ -72,10 +72,11 @@ class NodeProfileRepositoryCrudTest {
         }
 
         @Test
-        @DisplayName("rejects a reserved name")
-        void create_ReservedName_Throws() throws IOException {
-            assertThrows(IllegalArgumentException.class,
-                    () -> NodeProfileRepository.createProfile(confRoot(), "node-default", new Properties()));
+        @DisplayName("formerly reserved names are now valid profile names (2-layer)")
+        void create_FormerlyReservedName_IsAllowed() throws IOException {
+            NodeProfile result = NodeProfileRepository.createProfile(confRoot(), "node-default", new Properties());
+            assertNotNull(result);
+            assertTrue(Files.exists(profileFile("node-default")));
         }
 
         @Test
@@ -194,8 +195,8 @@ class NodeProfileRepositoryCrudTest {
     class DiscoverTests {
 
         @Test
-        @DisplayName("lists created profiles and excludes reserved names")
-        void discover_ListsCreated_ExcludesReserved() throws IOException {
+        @DisplayName("lists created profiles (formerly reserved names are now discoverable)")
+        void discover_ListsCreated_IncludesFormerlyReserved() throws IOException {
             NodeProfileRepository.createProfile(confRoot(), "aaa", new Properties());
             NodeProfileRepository.createProfile(confRoot(), "bbb", new Properties());
             Files.createDirectories(profilesDir());
@@ -205,7 +206,8 @@ class NodeProfileRepositoryCrudTest {
 
             assertTrue(names.contains("aaa"));
             assertTrue(names.contains("bbb"));
-            assertFalse(names.contains("node-default"));
+            assertTrue(names.contains("node-default"),
+                    "in the 2-layer model, formerly reserved names are regular profiles");
         }
     }
 
@@ -229,12 +231,12 @@ class NodeProfileRepositoryCrudTest {
         }
 
         @Test
-        @DisplayName("returns an error for a reserved name regardless of the taken set")
-        void check_ReservedName_ReturnsError() {
-            assertNotNull(NodeProfileRepository.checkProfileName("node-default", null));
-            assertNotNull(NodeProfileRepository.checkProfileName("logging-default", List.of()));
-            assertNotNull(NodeProfileRepository.checkProfileName("default", List.of()),
-                    "the canonical L1 name must be reserved as well");
+        @DisplayName("formerly reserved names are now valid (2-layer)")
+        void check_FormerlyReservedName_IsValid() {
+            assertNull(NodeProfileRepository.checkProfileName("node-default", null));
+            assertNull(NodeProfileRepository.checkProfileName("logging-default", List.of()));
+            assertNull(NodeProfileRepository.checkProfileName("default", List.of()),
+                    "in the 2-layer model, formerly reserved names are valid");
         }
 
         @Test

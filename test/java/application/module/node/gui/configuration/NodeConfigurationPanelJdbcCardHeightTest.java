@@ -2,7 +2,6 @@ package application.module.node.gui.configuration;
 
 import org.junit.jupiter.api.Test;
 
-import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -92,8 +91,8 @@ class NodeConfigurationPanelJdbcCardHeightTest {
             selectDatabaseTab(panel);
             settle();
 
-            JCheckBox checkbox = findCheckbox(wrapper);
-            assertNotNull(checkbox, "the 'Linked Database Profile' checkbox must exist");
+            LinkedDbModeSelector selector = findSelector(wrapper);
+            assertNotNull(selector, "the database-URL source selector must exist");
 
             // 1. Manual mode: the panel must fit the manual content.
             final Object[] state0 = new Object[1];
@@ -104,7 +103,7 @@ class NodeConfigurationPanelJdbcCardHeightTest {
                     "the panel must be sized to the manual content (no dead space)");
 
             // 2. Switch to the linked profile mode.
-            SwingUtilities.invokeAndWait(checkbox::doClick);
+            SwingUtilities.invokeAndWait(() -> selector.getLinkedRadio().doClick());
             settle();
             final Object[] linked = new Object[2];
             SwingUtilities.invokeAndWait(() -> {
@@ -127,7 +126,7 @@ class NodeConfigurationPanelJdbcCardHeightTest {
                     "the panel must be sized to the linked content (no dead space under the JDBC URL preview)");
 
             // 3. Switch back: the panel must grow back to the manual height.
-            SwingUtilities.invokeAndWait(checkbox::doClick);
+            SwingUtilities.invokeAndWait(() -> selector.getCustomRadio().doClick());
             settle();
             final Object[] state2 = new Object[1];
             SwingUtilities.invokeAndWait(() -> state2[0] = ((JdbcConfigurationPanel) jdbcPanel).isLinkedMode());
@@ -179,13 +178,13 @@ class NodeConfigurationPanelJdbcCardHeightTest {
 
     /**
      * The DB panel page sits inside JScrollPane -> JViewport; search for the
-     * MigLayout row wrapper (the container that directly holds the
-     * "Linked Database Profile" checkbox) at any depth.
+     * MigLayout row wrapper (the container that directly holds the database-URL
+     * source selector) at any depth.
      */
     private static void findRow(Component c, JComponent[] out) {
         if (c instanceof Container cc) {
             for (Component inner : cc.getComponents())
-                if (inner instanceof JCheckBox cb && "Linked Database Profile".equals(cb.getText())) {
+                if (inner instanceof LinkedDbModeSelector) {
                     if (cc.getLayout() != null
                             && cc.getLayout().getClass().getSimpleName().startsWith("Mig"))
                         out[0] = (JComponent) cc;
@@ -222,12 +221,12 @@ class NodeConfigurationPanelJdbcCardHeightTest {
         }
     }
 
-    private static JCheckBox findCheckbox(JComponent wrapper) throws Exception {
-        JCheckBox[] out = new JCheckBox[1];
+    private static LinkedDbModeSelector findSelector(JComponent wrapper) throws Exception {
+        LinkedDbModeSelector[] out = new LinkedDbModeSelector[1];
         SwingUtilities.invokeAndWait(() -> {
             for (Component c : wrapper.getComponents())
-                if (c instanceof JCheckBox cb && "Linked Database Profile".equals(cb.getText()))
-                    out[0] = cb;
+                if (c instanceof LinkedDbModeSelector sel)
+                    out[0] = sel;
         });
         return out[0];
     }

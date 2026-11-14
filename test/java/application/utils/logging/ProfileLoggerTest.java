@@ -303,8 +303,49 @@ class ProfileLoggerTest {
         }
 
         @Test
-        void defaultReplayCapacity_isAlignedWithConsoleMaxLines() {
+        void defaultReplayCapacity_isConservativeFallback() {
+            // The generic default is a conservative initial value. The node aligns the
+            // replay buffer to the resolved console line cap at startup (see
+            // setReplayCapacity), and the SystemLogger aligns to the system console L0
+            // default (see systemLoggerBufferSize_isAlignedWithSystemConsoleDefault).
             assertEquals(500, ProfileLogger.DEFAULT_REPLAY_CAPACITY);
+        }
+
+        @Test
+        void setReplayCapacity_updatesCapacity() {
+            ProfileLogger logger = new ProfileLogger("node", "mainnet", 2);
+            for (int i = 1; i <= 5; i++) {
+                logger.info("line-" + i);
+            }
+            logger.setReplayCapacity(10);
+            assertEquals(10, logger.getReplayCapacity());
+            // increasing the capacity does not restore previously evicted events
+            assertEquals(2, logger.getReplayBufferSize());
+        }
+
+        @Test
+        void setReplayCapacity_decreased_trimsOldest() {
+            ProfileLogger logger = new ProfileLogger("node", "mainnet", 10);
+            for (int i = 1; i <= 5; i++) {
+                logger.info("line-" + i);
+            }
+            logger.setReplayCapacity(2);
+            assertEquals(2, logger.getReplayBufferSize());
+
+            java.util.List<String> received = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+            logger.addSubscriber(new TestSubscriber(e -> received.add(e.getMessage())));
+            assertEquals(java.util.Arrays.asList("line-4", "line-5"), received);
+        }
+
+        @Test
+        void setReplayCapacity_invalid_throwsIAE() {
+            ProfileLogger logger = new ProfileLogger("node", "mainnet");
+            assertThrows(IllegalArgumentException.class, () -> logger.setReplayCapacity(0));
+        }
+
+        @Test
+        void systemLoggerBufferSize_isAlignedWithSystemConsoleDefault() {
+            assertEquals(ConsoleLimits.DEFAULT_SYSTEM_MAX_LINES, SystemLogger.BUFFER_SIZE);
         }
     }
 

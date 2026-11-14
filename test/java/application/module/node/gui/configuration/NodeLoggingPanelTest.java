@@ -41,9 +41,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Tests for {@link NodeLoggingPanel} — the thin node adapter over {@link ModuleLoggingProfilePanel}.
  * <p>
- * Verifies the composition (the adapter IS-A core panel), that the node File Handler rows are
- * present, that the value-typed editor assigns the correct control type per key, and that the core
- * extension methods ({@code addExtraField}, {@code setHelpSupplier}, {@code enableSearch}) take effect.
+ * Verifies the composition (the adapter IS-A core panel), that the value-typed editor assigns the
+ * correct control type per key (log level → classic combo, free value → editable combo), and that
+ * the core extension methods ({@code addExtraField}, {@code setHelpSupplier}, {@code enableSearch}) take effect.
  * Construction is pumped on the EDT (the same pattern as {@code LoggingPanelTest}).
  * </p>
  */
@@ -117,28 +117,17 @@ class NodeLoggingPanelTest {
     }
 
     @Test
-    @DisplayName("FileHandler extra fields are present as editor rows")
-    void fileHandlerRowsPresent() {
-        NodeLoggingPanel panel = newPanel();
-        List<String> labels = allLabels(panel);
-        assertTrue(labels.stream().anyMatch(l -> baseLabel(l).equals("File Level")), "File Level row present; labels=" + labels);
-        assertTrue(labels.stream().anyMatch(l -> baseLabel(l).equals("Log File Pattern")), "Log File Pattern row present; labels=" + labels);
-        assertTrue(labels.stream().anyMatch(l -> baseLabel(l).equals("File Size Limit (bytes)")), "File limit row present; labels=" + labels);
-        assertTrue(labels.stream().anyMatch(l -> baseLabel(l).equals("File Count")), "File count row present; labels=" + labels);
-    }
-
-    @Test
-    @DisplayName("the File Level editor is a CLASSIC (non-editable) level combo; the other editors EDITABLE combos: no plain text fields")
+    @DisplayName("file logging rows are value-typed (level classic combo, free values editable)")
     void valueTypedEditor() {
         NodeLoggingPanel panel = newPanel();
-        JComboBox<?> fileLevel = assertInstanceOf(JComboBox.class, editorForLabel(panel, "File Level"), "File Level should be a combo");
-        assertFalse(fileLevel.isEditable(), "the File Level editor is a classic (non-editable) combo over the predefined level list");
-        JComboBox<?> limit = assertInstanceOf(JComboBox.class, editorForLabel(panel, "File Size Limit (bytes)"), "limit should be an editable combo (no plain text field)");
-        assertTrue(limit.isEditable(), "the File Size Limit editor is an editable combo");
-        JComboBox<?> count = assertInstanceOf(JComboBox.class, editorForLabel(panel, "File Count"), "count should be an editable combo (no plain text field)");
-        assertTrue(count.isEditable(), "the File Count editor is an editable combo");
-        JComboBox<?> pattern = assertInstanceOf(JComboBox.class, editorForLabel(panel, "Log File Pattern"), "pattern should be an editable combo (no plain text field)");
-        assertTrue(pattern.isEditable(), "the Log File Pattern editor is an editable combo");
+        // The node.fileLog.level row carries a log4j2 level default (INFO), so makeEditor()
+        // renders it as a classic (non-editable) combo over the predefined level list.
+        JComboBox<?> level = assertInstanceOf(JComboBox.class, editorForLabel(panel, "node.fileLog.level"), "level should be a combo");
+        assertFalse(level.isEditable(), "the node.fileLog.level editor is a classic (non-editable) combo over the predefined level list");
+        JComboBox<?> dir = assertInstanceOf(JComboBox.class, editorForLabel(panel, "node.fileLog.dir"), "dir should be an editable combo (no plain text field)");
+        assertTrue(dir.isEditable(), "the node.fileLog.dir editor is an editable combo");
+        JComboBox<?> max = assertInstanceOf(JComboBox.class, editorForLabel(panel, "node.fileLog.max"), "max should be an editable combo (no plain text field)");
+        assertTrue(max.isEditable(), "the node.fileLog.max editor is an editable combo");
     }
 
     @Test
@@ -190,14 +179,14 @@ class NodeLoggingPanelTest {
     void unsavedRowIsStarred() {
         NodeLoggingPanel panel = newPanel();
         // With the virtual 'Default' entry selected, any change is unsaved.
-        JComboBox<?> fileLevel = assertInstanceOf(JComboBox.class, editorForLabel(panel, "File Level"));
-        Object current = fileLevel.getSelectedItem();
-        String other = "FINE".equals(String.valueOf(current)) ? "INFO" : "FINE";
-        onEdt(() -> fileLevel.setSelectedItem(other));
+        JComboBox<?> level = assertInstanceOf(JComboBox.class, editorForLabel(panel, "node.fileLog.level"));
+        Object current = level.getSelectedItem();
+        String other = "INFO".equals(String.valueOf(current)) ? "WARN" : "INFO";
+        onEdt(() -> level.setSelectedItem(other));
         List<String> labels = allLabels(panel);
-        assertTrue(labels.stream().anyMatch(l -> l != null && l.startsWith("File Level") && l.endsWith("*")),
+        assertTrue(labels.stream().anyMatch(l -> l != null && l.startsWith("node.fileLog.level") && l.endsWith("*")),
                 "the changed row carries the trailing star; labels=" + labels);
-        assertFalse(labels.stream().anyMatch(l -> l != null && l.startsWith("File Count") && l.endsWith("*")),
+        assertFalse(labels.stream().anyMatch(l -> l != null && l.startsWith("node.fileLog.max") && l.endsWith("*")),
                 "an untouched row must not be starred; labels=" + labels);
     }
 
@@ -345,9 +334,9 @@ class NodeLoggingPanelTest {
         String node = "zz-applied-baseline-node-" + System.nanoTime();
         String profile = "zz-applied-baseline-profile-" + System.nanoTime();
         Properties values = new Properties();
-        values.setProperty("java.util.logging.FileHandler.level", "WARNING");
+        values.setProperty("node.fileLog.level", "WARN");
         Properties sharedBaseline = new Properties();
-        sharedBaseline.setProperty("java.util.logging.FileHandler.level", "INFO");
+        sharedBaseline.setProperty("node.fileLog.level", "INFO");
         try {
             repository.create(ModuleIds.NODE, profile, values);
             repository.rememberAppliedBaseline(ModuleIds.NODE, profile, sharedBaseline);
@@ -358,11 +347,11 @@ class NodeLoggingPanelTest {
             assertEquals(profile, new LoggingAssignmentStore().getAssignment(node).get(ModuleIds.NODE),
                     "the selected profile is recorded as this node's assignment");
             assertEquals("INFO", repository.loadAppliedBaseline(ModuleIds.NODE, profile)
-                            .getProperty("java.util.logging.FileHandler.level"),
+                            .getProperty("node.fileLog.level"),
                     "the shared module-level baseline is not overwritten by a per-node assignment");
-            JComboBox<?> fileLevel = assertInstanceOf(JComboBox.class, editorForLabel(holder[0], "File Level"));
+            JComboBox<?> fileLevel = assertInstanceOf(JComboBox.class, editorForLabel(holder[0], "node.fileLog.level"));
             assertEquals(GuiColors.getApplied(), fileLevel.getForeground(),
-                    "the assigned profile's saved WARNING value matches its per-node applied baseline, "
+                    "the assigned profile's saved WARN value matches its per-node applied baseline, "
                             + "regardless of the module-level INFO baseline");
         } finally {
             try {
@@ -387,9 +376,9 @@ class NodeLoggingPanelTest {
         String appliedProfile = "zz-saved-init-applied-" + System.nanoTime();
         String savedProfile = "zz-saved-init-saved-" + System.nanoTime();
         Properties appliedValues = new Properties();
-        appliedValues.setProperty("java.util.logging.FileHandler.level", "INFO");
+        appliedValues.setProperty("node.fileLog.level", "INFO");
         Properties savedValues = new Properties();
-        savedValues.setProperty("java.util.logging.FileHandler.level", "WARNING");
+        savedValues.setProperty("node.fileLog.level", "WARN");
         try {
             repository.create(ModuleIds.NODE, appliedProfile, appliedValues);
             repository.create(ModuleIds.NODE, savedProfile, savedValues);
@@ -408,34 +397,34 @@ class NodeLoggingPanelTest {
             JCheckBox unsavedInitFilter = findCheckBox(panel, "Unsaved Init");
             assertNotNull(unsavedInitFilter, "the node-profile logging filter includes Unsaved Init");
 
-            JComboBox<?> fileLevel = assertInstanceOf(JComboBox.class, editorForLabel(panel, "File Level"));
+            JComboBox<?> fileLevel = assertInstanceOf(JComboBox.class, editorForLabel(panel, "node.fileLog.level"));
             @SuppressWarnings("unchecked")
             ListCellRenderer<Object> renderer = (ListCellRenderer<Object>) fileLevel.getRenderer();
             JLabel warningOption = (JLabel) renderer.getListCellRendererComponent(
-                    new JList<>(), "WARNING", -1, false, false);
+                    new JList<>(), "WARN", -1, false, false);
             assertEquals(GuiColors.getSavedInit(), warningOption.getForeground(),
                     "the saved init level uses the Saved Init font color in the dropdown");
             assertEquals(new JList<>().getBackground(), warningOption.getBackground(),
                     "the Saved Init option keeps the normal dropdown background");
             JList<String> options = new JList<>();
             JLabel selectedWarning = (JLabel) renderer.getListCellRendererComponent(
-                    options, "WARNING", -1, true, false);
+                    options, "WARN", -1, true, false);
             assertEquals(GuiColors.getSavedInit(), selectedWarning.getForeground(),
                     "hovering a Saved Init level preserves its state font color");
             assertEquals(options.getSelectionBackground(), selectedWarning.getBackground(),
                     "hovering keeps the normal selection background");
-            assertEquals(GuiColors.getSavedInit(), findLabel(panel, "File Level").getForeground(),
+            assertEquals(GuiColors.getSavedInit(), findLabel(panel, "node.fileLog.level").getForeground(),
                     "the current row also reflects its Saved Init state");
 
-            onEdt(() -> fileLevel.setSelectedItem("SEVERE"));
+            onEdt(() -> fileLevel.setSelectedItem("ERROR"));
             onEdt(findButtonByTooltip(panel, "Save<br>")::doClick);
-            onEdt(() -> fileLevel.setSelectedItem("WARNING"));
-            assertEquals(GuiColors.getUnsavedInit(), findLabel(panel, "File Level *").getForeground(),
+            onEdt(() -> fileLevel.setSelectedItem("WARN"));
+            assertEquals(GuiColors.getUnsavedInit(), findLabel(panel, "node.fileLog.level *").getForeground(),
                     "returning to init after saving a different level yields Unsaved Init");
             assertEquals(GuiColors.getUnsavedInit(), fileLevel.getForeground(),
                     "the node logging editor uses the Unsaved Init palette color");
             assertEquals(GuiColors.getUnsavedInit(),
-                    renderer.getListCellRendererComponent(new JList<>(), "WARNING", -1, false, false)
+                    renderer.getListCellRendererComponent(new JList<>(), "WARN", -1, false, false)
                             .getForeground(),
                     "the init dropdown option uses the Unsaved Init color after saved diverges");
         } finally {
@@ -508,8 +497,11 @@ class NodeLoggingPanelTest {
         onEdt(() -> holder[0] = new NodeLoggingPanel("zz-laf-node", () -> { }));
         NodeLoggingPanel panel = holder[0];
 
-        JComboBox<?> combo = assertInstanceOf(JComboBox.class, editorForLabel(panel, "handlers"),
-                "the 'handlers' row (a non-level value) is an editable combo");
+        // F0-F4 (log4j2): the JUL "handlers" row no longer exists (the handlers L0 default was removed).
+        // Exercise the same "editable combo's tooltip survives an L&F pass" behavior on another
+        // non-level editable row instead.
+        JComboBox<?> combo = assertInstanceOf(JComboBox.class, editorForLabel(panel, "node.fileLog.dir"),
+                "the 'node.fileLog.dir' row (a non-level value) is an editable combo");
         assertTrue(combo.isEditable(), "the non-level rows are editable combos");
         JTextField original = editorTextFieldOf((JComponent) combo.getEditor().getEditorComponent());
         assertNotNull(original, "the editable combo carries an editor text field");
@@ -615,8 +607,8 @@ class NodeLoggingPanelTest {
     @DisplayName("row coloring: an untouched row is never 'unsaved' (it is saved/applied)")
     void untouchedRowIsNotUnsaved() {
         NodeLoggingPanel panel = newPanel();
-        JLabel label = findLabel(panel, "File Count");
-        assertNotNull(label, "File Count row label present");
+        JLabel label = findLabel(panel, "node.fileLog.max");
+        assertNotNull(label, "node.fileLog.max row label present");
         assertNotEquals(GuiColors.getUnsaved(), label.getForeground(),
                 "an untouched row (value == default/saved) must not be colored unsaved");
     }
@@ -627,11 +619,11 @@ class NodeLoggingPanelTest {
         final NodeLoggingPanel[] holder = new NodeLoggingPanel[1];
         onEdt(() -> {
             NodeLoggingPanel p = new NodeLoggingPanel(() -> { }); // already on the EDT
-            JComponent editor = editorForLabel(p, "File Count"); // editable combo, default "1"
-            editorText(editor).setText("2");
+            JComponent editor = editorForLabel(p, "node.fileLog.max"); // editable combo, default "5"
+            editorText(editor).setText("6");
             holder[0] = p;
         });
-        JLabel label = findLabel(holder[0], "File Count");
+        JLabel label = findLabel(holder[0], "node.fileLog.max");
         assertEquals(GuiColors.getUnsaved(), label.getForeground(), "an edited row is colored unsaved");
     }
 
@@ -642,7 +634,7 @@ class NodeLoggingPanelTest {
         final JCheckBox[] boxHolder = new JCheckBox[1];
         onEdt(() -> {
             NodeLoggingPanel p = new NodeLoggingPanel(() -> { }); // already on the EDT
-            editorText(editorForLabel(p, "File Count")).setText("2"); // make it unsaved
+            editorText(editorForLabel(p, "node.fileLog.max")).setText("6"); // make it unsaved
             panelHolder[0] = p;
             boxHolder[0] = findCheckBox(p, "Unsaved");
         });
@@ -652,29 +644,12 @@ class NodeLoggingPanelTest {
         // doClick() (a simulated user click) — a programmatic setSelected does
         // not fire the ActionEvent that drives the row re-render.
         onEdt(box::doClick); // uncheck → hide unsaved rows
-        assertFalse(hasLabel(panelHolder[0], "File Count"),
+        assertFalse(hasLabel(panelHolder[0], "node.fileLog.max"),
                 "the unsaved row is hidden while 'Unsaved' is off");
 
         onEdt(box::doClick); // check again → show them
-        assertTrue(hasLabel(panelHolder[0], "File Count"),
+        assertTrue(hasLabel(panelHolder[0], "node.fileLog.max"),
                 "the row reappears when the filter is switched back on");
-    }
-
-    @Test
-    @DisplayName("host-added (FileHandler) rows carry a DISABLED 'Remove key' icon (built-in rows)")
-    void hostRowsAreNotRemovable() {
-        NodeLoggingPanel panel = newPanel();
-        JComponent editor = editorForLabel(panel, "File Count");
-        assertNotNull(editor, "the File Count row editor is present");
-        Container cell = (Container) editor.getParent();
-        JButton remove = null;
-        for (Component child : cell.getComponents()) {
-            if (child instanceof JButton) {
-                remove = (JButton) child;
-            }
-        }
-        assertNotNull(remove, "the row's value cell carries the 'Remove key' trash icon");
-        assertFalse(remove.isEnabled(), "host-registered (built-in) rows cannot be removed");
     }
 
     private static boolean hasLabel(Container root, String text) {

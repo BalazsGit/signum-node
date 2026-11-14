@@ -128,9 +128,19 @@ class NodeConfigurationPanelDeleteButtonTest {
             // Wait until the test profile's tab has been lazily replaced by a
             // loaded NodeProfilePanel whose configuration panel finished its
             // async init (allPropertyRows non-empty).
+            //
+            // The state check runs on the EDT but the wait is BOUNDED from this
+            // thread: while the heavy async init (initUI building thousands of
+            // components) is in flight the EDT stays busy, and a plain
+            // SwingUtilities.invokeAndWait would park this thread past
+            // INIT_TIMEOUT_MS, silently defeating the timeout (the wait would
+            // only return once the EDT was free again). The bounded latch keeps
+            // the hard deadline below enforceable in that case.
             long deadline = System.currentTimeMillis() + INIT_TIMEOUT_MS;
             while (System.currentTimeMillis() < deadline && configPanelRef[0] == null) {
-                SwingUtilities.invokeAndWait(() -> {
+                final java.util.concurrent.CountDownLatch checked =
+                        new java.util.concurrent.CountDownLatch(1);
+                SwingUtilities.invokeLater(() -> {
                     try {
                         NodeProfilePanel profilePanel = ((NodePanel) panelRef[0]).getProfilePanel(TEST_PROFILE);
                         if (profilePanel != null) {
@@ -144,12 +154,16 @@ class NodeConfigurationPanelDeleteButtonTest {
                         }
                     } catch (Exception ignore) {
                         // still loading
+                    } finally {
+                        checked.countDown();
                     }
                 });
+                checked.await(5, java.util.concurrent.TimeUnit.SECONDS);
                 Thread.sleep(200);
             }
             assertNotNull(configPanelRef[0],
-                    "the profile tab must load its configuration panel for " + TEST_PROFILE);
+                    "the profile tab must load its configuration panel for " + TEST_PROFILE
+                            + " (gave up after " + INIT_TIMEOUT_MS + " ms)");
 
             // Resolve the icon-only Delete toolbar button on the config panel.
             final Object[] btnRef = new Object[1];

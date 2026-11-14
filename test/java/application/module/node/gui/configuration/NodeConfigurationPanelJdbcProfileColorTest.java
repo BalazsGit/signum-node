@@ -6,7 +6,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import javax.swing.JComponent;
 import javax.swing.JComboBox;
 import javax.swing.JFrame;
 import javax.swing.SwingUtilities;
@@ -186,19 +185,16 @@ class NodeConfigurationPanelJdbcProfileColorTest {
 
         // The collapsed display: the selected (D2) link now equals the saved
         // baseline but differs from the applied one -> saved (yellow), the
-        // same state the other configuration rows report after a save — and
-        // the color must reach the VISIBLE editor text of the editable combo,
-        // not only the combo component itself.
-        final Object[] collapsed = new Object[2];
+        // same state the other configuration rows report after a save. The
+        // profile select is a PLAIN (non-editable) combo, so the state color
+        // is painted on the combo itself (there is no editor text).
+        final Object[] collapsed = new Object[1];
         SwingUtilities.invokeAndWait(() -> {
             JComboBox<?> combo = (JComboBox<?>) jdbc.getProfileComboComponent();
             collapsed[0] = combo.getForeground();
-            collapsed[1] = ((JComponent) combo.getEditor().getEditorComponent()).getForeground();
         });
         assertEquals(GuiColors.getSaved(), collapsed[0],
                 "the collapsed profile select must show the saved (yellow) state after the save");
-        assertEquals(GuiColors.getSaved(), collapsed[1],
-                "the editable combo's visible editor text must carry the saved (yellow) state after the save");
     }
 
     // ------------------------------------------------------------------
@@ -223,6 +219,7 @@ class NodeConfigurationPanelJdbcProfileColorTest {
         assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
         profileConfigExisted = Files.exists(PROFILE_CONFIG);
         profileConfigBackup = profileConfigExisted ? Files.readAllBytes(PROFILE_CONFIG) : null;
+        final AtomicReference<JFrame> ownerRef = new AtomicReference<>();
         try {
             // the node profile uses MD1's instance URL
             Files.createDirectories(M_NODE_PROPS.getParent());
@@ -251,6 +248,7 @@ class NodeConfigurationPanelJdbcProfileColorTest {
                 owner.setSize(900, 700);
                 owner.setVisible(true);
                 panelRef.set(panel);
+                ownerRef.set(owner);
             });
             assertNotNull(panelRef.get(), "the configuration panel must be constructable: " + error.get());
             NodeConfigurationPanel panel = panelRef.get();
@@ -311,6 +309,20 @@ class NodeConfigurationPanelJdbcProfileColorTest {
             assertEquals(GuiColors.getSaved(), colors[1],
                     "the newly saved MariaDB profile must be saved (yellow) after the save");
         } finally {
+            // Dispose the panel on the EDT BEFORE restoring the metadata: a
+            // live panel may still flush its (normalized) ProfileConfig save,
+            // and such a write would race with — and clobber — the restore
+            // below (leaving the test profile's databaseProfileLink behind
+            // for the next test run).
+            SwingUtilities.invokeAndWait(() -> {
+                JFrame owner = ownerRef.get();
+                if (owner != null) {
+                    owner.dispose();
+                }
+            });
+            SwingUtilities.invokeAndWait(() -> {
+                // flush any EDT work the panel queued before the dispose
+            });
             if (profileConfigExisted) {
                 Files.write(PROFILE_CONFIG, profileConfigBackup);
             } else {

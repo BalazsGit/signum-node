@@ -300,4 +300,70 @@ class GuiManagerTest {
             javax.swing.UIManager.setLookAndFeel(previousLaf);
         }
     }
+
+    // ======================================================================
+    // Translucent tooltip background tests
+    // ======================================================================
+
+    @Test
+    void applyTranslucentToolTips_MakesTooltipBackgroundSemiTransparent() throws Exception {
+        javax.swing.LookAndFeel previousLaf = javax.swing.UIManager.getLookAndFeel();
+        try {
+            javax.swing.UIManager.setLookAndFeel(new com.formdev.flatlaf.FlatDarkLaf());
+            // Start from an opaque background so the alpha change is observable.
+            javax.swing.UIManager.put("ToolTip.background", new java.awt.Color(200, 190, 175));
+
+            GuiManager.getInstance().applyTranslucentToolTips();
+
+            java.awt.Color bg = javax.swing.UIManager.getColor("ToolTip.background");
+            assertNotNull(bg, "ToolTip.background must still be present");
+            assertTrue(bg.getAlpha() < 255,
+                    "the tooltip background should be semi-transparent, alpha=" + bg.getAlpha());
+            // The active theme's hue (RGB) is preserved; only the alpha changes.
+            assertEquals(200, bg.getRed(), "the tooltip background hue (R) must be preserved");
+            assertEquals(190, bg.getGreen(), "the tooltip background hue (G) must be preserved");
+            assertEquals(175, bg.getBlue(), "the tooltip background hue (B) must be preserved");
+        } finally {
+            javax.swing.UIManager.setLookAndFeel(previousLaf);
+        }
+    }
+
+    @Test
+    void applyTranslucentToolTips_TooltipBackgroundBlendsWithBackdrop() throws Exception {
+        javax.swing.LookAndFeel previousLaf = javax.swing.UIManager.getLookAndFeel();
+        try {
+            javax.swing.UIManager.setLookAndFeel(new com.formdev.flatlaf.FlatDarkLaf());
+            // Start from an opaque white tooltip background.
+            javax.swing.UIManager.put("ToolTip.background", new java.awt.Color(255, 255, 255));
+
+            GuiManager.getInstance().applyTranslucentToolTips();
+
+            final int[] pixel = new int[1];
+            javax.swing.SwingUtilities.invokeAndWait(() -> {
+                javax.swing.JToolTip tip = new javax.swing.JToolTip();
+                tip.setSize(40, 20);
+                java.awt.image.BufferedImage img =
+                        new java.awt.image.BufferedImage(40, 20, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+                java.awt.Graphics2D g = img.createGraphics();
+                g.setColor(new java.awt.Color(255, 0, 0)); // red "UI behind" backdrop
+                g.fillRect(0, 0, 40, 20);
+                tip.paint(g);
+                g.dispose();
+                pixel[0] = img.getRGB(20, 10);
+            });
+            int a = (pixel[0] >>> 24) & 0xff;
+            int r = (pixel[0] >> 16) & 0xff;
+            int g = (pixel[0] >> 8) & 0xff;
+            int b = pixel[0] & 0xff;
+            // A white tooltip at alpha < 255 painted over red (255,0,0) must blend:
+            // it stays fully opaque to the screen, red is preserved, and green/blue
+            // rise above 0 (the white showing through) but stay below 255.
+            assertEquals(255, a, "the tooltip must remain fully opaque to the screen");
+            assertEquals(255, r, "the backdrop red channel is preserved");
+            assertTrue(g > 0 && g < 255, "green must blend between backdrop (0) and tooltip (255), was " + g);
+            assertTrue(b > 0 && b < 255, "blue must blend between backdrop (0) and tooltip (255), was " + b);
+        } finally {
+            javax.swing.UIManager.setLookAndFeel(previousLaf);
+        }
+    }
 }

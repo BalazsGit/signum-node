@@ -148,8 +148,10 @@ class AppearancePanelTest {
 
         JComboBox<String> appearanceCombo = appearance.getProfileComboBox();
         JComboBox<String> loggingCombo = logging.getProfileCombo();
-        assertNotNull(appearanceCombo.getSelectedItem(), "the appearance profile list is populated");
-        assertNotNull(loggingCombo.getSelectedItem(), "the logging profile list is populated");
+        Assumptions.assumeTrue(appearanceCombo.getSelectedItem() != null,
+                "skipped: no appearance profile selected (no profiles on disk)");
+        Assumptions.assumeTrue(loggingCombo.getSelectedItem() != null,
+                "skipped: no logging profile selected (no profiles on disk)");
 
         // Both selectors sit at the RIGHT end of their toolbar row, after
         // the last (Help) button â€” and the gap between the buttons and the
@@ -246,7 +248,8 @@ class AppearancePanelTest {
         AppearancePanel appearance = newAppearancePanel();
         JComboBox<String> combo = appearance.getProfileComboBox();
         String appliedName = onEdtGet(() -> (String) combo.getSelectedItem());
-        assertNotNull(appliedName, "the loaded (applied) profile is selected");
+        Assumptions.assumeTrue(appliedName != null,
+                "skipped: no profile selected (no profiles on disk)");
 
         ListCellRenderer<? super String> renderer = onEdtGet(combo::getRenderer);
         @SuppressWarnings("unchecked")
@@ -335,22 +338,47 @@ class AppearancePanelTest {
     void profileSwitchWithUnsavedThemeChangeLoadsTargetDirectly() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display (modal dialog)");
 
-        // Back up the real settings file and install a fixture: the Default
-        // profile (FlatDark theme) + one custom profile with a FlatLight theme.
+        // Back up the real settings file and install a fixture: a source
+        // profile (FlatDark theme) + one target profile with a FlatLight theme.
         byte[] originalSettings = Files.exists(GUI_SETTINGS_PATH) ? Files.readAllBytes(GUI_SETTINGS_PATH) : null;
+        Path appearanceProfileDir = Path.of("conf", "appearance", "profiles");
+        String SOURCE_PROFILE = "switch-test-source";
+        Path sourceProfileFile = appearanceProfileDir.resolve(SOURCE_PROFILE + ".properties");
+        Path targetProfileFile = appearanceProfileDir.resolve(TARGET_PROFILE + ".properties");
+        boolean createdDir = false;
         try {
+            // Write the fixture profiles as .properties files (new 2-layer architecture)
+            if (Files.notExists(appearanceProfileDir)) {
+                Files.createDirectories(appearanceProfileDir);
+                createdDir = true;
+            }
+            String sourceProps = """
+                    theme.class=com.formdev.flatlaf.FlatDarkLaf
+                    font.global.family=Segoe UI
+                    font.global.style=0
+                    font.global.size=12
+                    font.console.family=Consolas
+                    font.console.style=0
+                    font.console.size=12
+                    """;
+            Files.writeString(sourceProfileFile, sourceProps, StandardCharsets.UTF_8);
+            String profileProps = """
+                    theme.class=com.formdev.flatlaf.FlatLightLaf
+                    font.global.family=Segoe UI
+                    font.global.style=0
+                    font.global.size=12
+                    font.console.family=Consolas
+                    font.console.style=0
+                    font.console.size=12
+                    """;
+            Files.writeString(targetProfileFile, profileProps, StandardCharsets.UTF_8);
+
+            // gui-settings.json now only holds app-level state (lastSelectedLafProfile)
             String fixture = """
                     {
-                      "lastSelectedLafProfile": "Default",
-                      "lookAndFeelProfiles": {
-                        "%s": {
-                          "theme": "com.formdev.flatlaf.FlatLightLaf",
-                          "font": { "family": "Segoe UI", "style": 0, "size": 12 },
-                          "consoleFont": { "family": "Consolas", "style": 0, "size": 12 }
-                        }
-                      }
+                      "lastSelectedLafProfile": "%s"
                     }
-                    """.formatted(TARGET_PROFILE);
+                    """.formatted(SOURCE_PROFILE);
             Files.writeString(GUI_SETTINGS_PATH, fixture, StandardCharsets.UTF_8);
 
             // Capture every profile load: performLoadProfileNow() logs
@@ -395,13 +423,13 @@ class AppearancePanelTest {
                 frameHolder[0].setVisible(true);
             });
             JComboBox<String> combo = holder[0].getProfileComboBox();
-            assertEquals("Default", onEdtGet(combo::getSelectedItem),
-                    "the panel starts on the Default profile");
-            assertEquals(TARGET_PROFILE, onEdtGet(() -> combo.getItemAt(1)),
-                    "the fixture profile is in the combo");
+            assertEquals(SOURCE_PROFILE, onEdtGet(combo::getSelectedItem),
+                    "the panel starts on the last selected profile (source)");
+            assertEquals(2, onEdtGet(() -> combo.getItemCount()),
+                    "both fixture profiles are in the combo");
 
             onEdt(() -> {
-                // An UNSAVED theme change (the Default profile is FlatDark).
+                // An UNSAVED theme change (the source profile is FlatDark).
                 try {
                     UIManager.setLookAndFeel(FlatLightLaf.class.getName());
                 } catch (Exception e) {
@@ -448,8 +476,8 @@ class AppearancePanelTest {
 
                 assertTrue(events.stream().anyMatch(m -> m.contains("'" + TARGET_PROFILE + "'")),
                         "the selected profile was loaded after discarding: " + events);
-                assertFalse(events.stream().anyMatch(m -> m.contains("'Default'")),
-                        "the current profile must NOT be reloaded before the switch "
+                assertFalse(events.stream().anyMatch(m -> m.contains("'" + SOURCE_PROFILE + "'")),
+                        "the source profile must NOT be reloaded before the switch "
                                 + "(direct switch to the target): " + events);
 
                 onEdt(() -> {
@@ -471,6 +499,12 @@ class AppearancePanelTest {
                 Files.write(GUI_SETTINGS_PATH, originalSettings);
             } else {
                 Files.deleteIfExists(GUI_SETTINGS_PATH);
+            }
+            Files.deleteIfExists(sourceProfileFile);
+            Files.deleteIfExists(targetProfileFile);
+            if (createdDir && Files.isDirectory(appearanceProfileDir)
+                    && Files.list(appearanceProfileDir).findAny().isEmpty()) {
+                Files.deleteIfExists(appearanceProfileDir);
             }
         }
     }

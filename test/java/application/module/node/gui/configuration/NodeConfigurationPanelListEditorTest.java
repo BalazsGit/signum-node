@@ -335,6 +335,18 @@ class NodeConfigurationPanelListEditorTest {
                         + ", plus " + rowPlus.getBounds() + ")");
         assertEquals(rowTrash.getWidth(), rowPlus.getWidth(),
                 "the trash and plus buttons must fill the same-width action column");
+        // 11b. The list-editor add "+" is a STATIC, non-growing glyph — the inline
+        //      list-editor add buttons live in the field area (next to the row's
+        //      trash and help icons) and do NOT grow on hover. Grow-on-hover is
+        //      reserved for the header function buttons (the profile-toolbar New
+        //      Profile "+", the node toolbar's icon buttons); the node-tab's own
+        //      trailing "+" also stays static.
+        javax.swing.JButton addButton = (javax.swing.JButton) readField(commaEditor, "addButton");
+        assertNotNull(addButton.getIcon(),
+                "the list-editor add '+' must carry its plus glyph");
+        assertNull(addButton.getRolloverIcon(),
+                "the list-editor add '+' must be static (no grow-on-hover rollover icon) — "
+                        + "inline list-editor add buttons do not grow on hover");
 
         // 14. The profile-toolbar Help button uses the same flat, hover-scaled
         //     icon-button interaction as the logging profile toolbar.
@@ -348,6 +360,14 @@ class NodeConfigurationPanelListEditorTest {
                 "the profile-toolbar Help button must use the shared hover-scale interaction");
         assertEquals(toolbarSave.getIcon().getIconWidth(), toolbarHelp.getIcon().getIconWidth(),
                 "the Help glyph must match the other profile-toolbar glyph sizes");
+        // 14b. The profile-toolbar New Profile "+" (the prominent configuration "+")
+        //      grows on hover exactly like its siblings — the configuration-panel
+        //      function-button "+" that must grow (the node-tab trailing "+" stays static).
+        javax.swing.JButton newProfileBtn = (javax.swing.JButton) readField(panel, "newProfileBtn");
+        assertNotNull(newProfileBtn.getIcon(),
+                "the profile-toolbar New Profile '+' must carry its plus glyph");
+        assertNotNull(newProfileBtn.getRolloverIcon(),
+                "the profile-toolbar New Profile '+' must grow on hover like its siblings");
 
         // 12. Separate list properties keep the same field-column width,
         //     regardless of whether the current values are long or empty.

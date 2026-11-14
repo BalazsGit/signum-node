@@ -80,50 +80,51 @@ class NodeConfigurationPanelJdbcRowHelpLayoutTest {
 
             final Component[] comps = new Component[2];
             SwingUtilities.invokeAndWait(() -> {
-                JCheckBox checkbox = null;
+                JComponent selector = null;
                 JButton helpBtn = null;
                 for (Component c : w.getComponents()) {
-                    if (c instanceof JCheckBox cb && "Linked Database Profile".equals(cb.getText())) {
-                        checkbox = cb;
+                    if (c instanceof LinkedDbModeSelector) {
+                        selector = (JComponent) c;
                     }
                 }
-                assertNotNull(checkbox, "the 'Linked Database Profile' checkbox must exist");
+                assertNotNull(selector, "the database-URL source selector must exist");
                 for (Component c : w.getComponents()) {
-                    if (c instanceof JButton) {
+                    if (c instanceof application.utils.gui.HelpButton) {
                         helpBtn = (JButton) c;
                     }
                 }
-                comps[0] = checkbox;
+                comps[0] = selector;
                 comps[1] = helpBtn;
             });
-            JCheckBox checkbox = (JCheckBox) comps[0];
+            JComponent selector = (JComponent) comps[0];
             JButton helpBtn = (JButton) comps[1];
-            assertNotNull(helpBtn, "the row's ? help icon must sit in the wrapper's checkbox row");
-            assertNotSame(checkbox.getParent(), panel, "the checkbox is a direct wrapper child");
+            assertNotNull(helpBtn, "the row's ? help icon must sit in the wrapper's selector row");
+            assertNotSame(selector.getParent(), panel, "the selector is a direct wrapper child");
             assertTrue(w.isAncestorOf(helpBtn), "the ? help icon must live inside the row's wrapper");
-            assertTrue(checkbox.getParent() == helpBtn.getParent(),
-                    "the ? must share the checkbox's row container (the same row)");
+            assertTrue(selector.getParent() == helpBtn.getParent(),
+                    "the ? must share the selector's row container (the same row)");
 
-            // Same row: the ? starts to the RIGHT of the checkbox...
+            // Same row: the ? starts to the RIGHT of the selector...
             final java.awt.Point[] pos = { new java.awt.Point(), new java.awt.Point() };
             final java.awt.Dimension[] size = { new java.awt.Dimension(), new java.awt.Dimension() };
             SwingUtilities.invokeAndWait(() -> {
-                checkbox.getLocation(pos[0]);
+                selector.getLocation(pos[0]);
                 helpBtn.getLocation(pos[1]);
-                size[0] = checkbox.getSize();
+                size[0] = selector.getSize();
                 size[1] = helpBtn.getSize();
             });
             assertTrue(pos[1].x >= pos[0].x + size[0].width,
-                    "the ? must sit to the right of the checkbox (? x=" + pos[1].x
-                            + ", checkbox end x=" + (pos[0].x + size[0].width) + ")");
+                    "the ? must sit to the right of the selector (? x=" + pos[1].x
+                            + ", selector end x=" + (pos[0].x + size[0].width) + ")");
             // ...and is vertically CENTERED on that row (centers align).
-            int checkboxCenterY = pos[0].y + size[0].height / 2;
+            int selectorCenterY = pos[0].y + size[0].height / 2;
             int helpCenterY = pos[1].y + size[1].height / 2;
-            assertFalse(Math.abs(checkboxCenterY - helpCenterY) > 2,
-                    "the ? must be vertically centered on the checkbox row (checkbox centerY=" + checkboxCenterY
+            assertFalse(Math.abs(selectorCenterY - helpCenterY) > 2,
+                    "the ? must be vertically centered on the selector row (selector centerY=" + selectorCenterY
                             + ", ? centerY=" + helpCenterY + ")");
 
-            // The wrapper carries exactly the checkbox row's ? icon — the
+            // The wrapper carries exactly the selector row's two buttons —
+            // the create-profile "+" (BEFORE the "?") and the ? icon — the
             // row's model-level help part is gone (the ? travels inside the
             // wrapper).
             final int[] wrapperButtons = { -1 };
@@ -136,8 +137,22 @@ class NodeConfigurationPanelJdbcRowHelpLayoutTest {
                 }
                 wrapperButtons[0] = n;
             });
-            assertTrue(wrapperButtons[0] == 1,
-                    "the wrapper carries exactly the checkbox row's ? icon, got " + wrapperButtons[0]);
+            assertTrue(wrapperButtons[0] == 2,
+                    "the wrapper carries the checkbox row's '+' and ? icons, got " + wrapperButtons[0]);
+            // The "+" create-profile button sits BETWEEN the checkbox and the ?
+            // help icon.
+            final java.awt.Point[] plusPos = { new java.awt.Point() };
+            SwingUtilities.invokeAndWait(() -> {
+                for (Component c : w.getComponents()) {
+                    if (c instanceof JButton b && !(b instanceof application.utils.gui.HelpButton)) {
+                        b.getLocation(plusPos[0]);
+                        return;
+                    }
+                }
+            });
+            assertTrue(plusPos[0].x >= pos[0].x + size[0].width && plusPos[0].x < pos[1].x,
+                    "the '+' must sit to the right of the selector and left of the ? "
+                            + "(+ x=" + plusPos[0].x + ")");
         } finally {
             SwingUtilities.invokeAndWait(owner::dispose);
             if (!propsExisted) {
@@ -184,7 +199,7 @@ class NodeConfigurationPanelJdbcRowHelpLayoutTest {
             return;
         }
         for (Component inner : cc.getComponents()) {
-            if (inner instanceof JCheckBox cb && "Linked Database Profile".equals(cb.getText())) {
+            if (inner instanceof LinkedDbModeSelector) {
                 if (cc.getLayout() != null && cc.getLayout().getClass().getSimpleName().startsWith("Mig")) {
                     out[0] = (JComponent) cc;
                 }

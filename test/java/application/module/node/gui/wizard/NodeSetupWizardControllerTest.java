@@ -4,8 +4,11 @@ import application.module.database.gui.DatabaseConfigurationPanel.DatabaseEngine
 import application.module.node.gui.wizard.steps.DatabaseConnectionStep;
 import application.module.node.gui.wizard.steps.DatabaseInstallationStep;
 import application.module.node.gui.wizard.steps.DatabaseSelectionStep;
+import application.module.node.gui.wizard.steps.LoggingSelectionStep;
 import application.module.node.gui.wizard.steps.NodeConfigurationStep;
+import application.module.node.gui.wizard.steps.ProfileNameStep;
 import application.module.node.gui.wizard.steps.SummaryStep;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -17,6 +20,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -28,6 +32,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("NodeSetupWizardController")
 class NodeSetupWizardControllerTest {
+
+    /**
+     * The application registers the icon font at startup (AppearanceModule#init);
+     * do the same here so the steps' HelpButton / icon font glyphs resolve in
+     * the test.
+     */
+    @BeforeAll
+    static void registerIconFont() {
+        jiconfont.swing.IconFontSwing.register(jiconfont.icons.font_awesome.FontAwesome.getIconFont());
+    }
 
     /** Minimal fake step for state-machine tests. */
     private static class FakeStep implements WizardStep {
@@ -55,15 +69,17 @@ class NodeSetupWizardControllerTest {
     }
 
     @Test
-    @DisplayName("default wizard chain has the canonical steps (incl. install + connection)")
+    @DisplayName("default wizard chain has the canonical steps (name first, incl. install + connection)")
     void defaultStepChain() {
         List<WizardStep> steps = NodeSetupWizardController.defaultSteps();
-        assertEquals(5, steps.size());
-        assertEquals("database-selection", steps.get(0).getId());
-        assertEquals("database-installation", steps.get(1).getId());
-        assertEquals("database-connection", steps.get(2).getId());
-        assertEquals("node-configuration", steps.get(3).getId());
-        assertEquals("summary", steps.get(4).getId());
+        assertEquals(7, steps.size());
+        assertEquals("profile-name", steps.get(0).getId());
+        assertEquals("database-selection", steps.get(1).getId());
+        assertEquals("database-installation", steps.get(2).getId());
+        assertEquals("database-connection", steps.get(3).getId());
+        assertEquals("node-configuration", steps.get(4).getId());
+        assertEquals("logging-selection", steps.get(5).getId());
+        assertEquals("summary", steps.get(6).getId());
     }
 
     @Test
@@ -129,30 +145,42 @@ class NodeSetupWizardControllerTest {
     }
 
     @Test
-    @DisplayName("full wizard flow (SQLite): 3 steps — selection, DB configuration, node configuration")
+    @DisplayName("full wizard flow (SQLite): 5 steps — name, selection, DB configuration, node configuration")
     void fullFlowSqlite() {
-        NodeConfigurationStep nodeStep = new NodeConfigurationStep(() -> new HashSet<>(List.of("mainnet", "mainnet_01")));
+        Set<String> taken = new HashSet<>(List.of("mainnet", "mainnet_01"));
+        NodeConfigurationStep nodeConfig = new NodeConfigurationStep(); // no disk writes: virtual in-memory profile
         NodeSetupWizardController c = new NodeSetupWizardController(Arrays.asList(
+                new ProfileNameStep(() -> new HashSet<>(taken)),
                 new DatabaseSelectionStep(),
                 new DatabaseInstallationStep(),
-                new application.module.node.gui.wizard.steps.DatabaseConnectionStep(),
-                nodeStep,
-                new SummaryStep()));
+                new DatabaseConnectionStep(),
+                nodeConfig,
+                new LoggingSelectionStep(),
+                new SummaryStep()),
+                () -> new HashSet<>(taken));
         WizardContext ctx = c.getContext();
 
-        // step 1: engine selection (SQLite default) — the DB installation step is auto-skipped
+        // step 1: profile name — the suggested name is resolved against the taken names
+        assertNull(c.next());
+        assertEquals("mainnet_02", ctx.getName(), "the suggested name skips the taken base + _01");
+        assertEquals("database-selection", c.currentStep().getId());
+
+        // step 2: engine selection (SQLite default) — the DB installation step is auto-skipped
         assertNull(c.next());
         assertEquals("database-connection", c.currentStep().getId(),
                 "SQLite walks the DB-configuration step (server engines only add the installation step)");
         assertEquals(application.module.database.gui.DatabaseConfigurationPanel.DatabaseEngine.SQLITE,
                 ctx.getEngine());
 
-        // step 2: DB configuration — same step as the server engines (file-based → lenient)
+        // step 3: DB configuration — same step as the server engines (file-based → lenient)
         assertNull(c.next());
         assertEquals("node-configuration", c.currentStep().getId());
-        assertTrue(c.isLastStep(), "SQLite: the node-configuration step is the LAST step (no summary)");
 
-        // step 3: finish — the node configuration collects the suggested name (avoids the taken names)
+        assertNull(c.next());
+        assertEquals("logging-selection", c.currentStep().getId());
+        assertTrue(c.isLastStep(), "SQLite: the logging step is the LAST step (no summary)");
+
+        // step 4: finish — the collected state keeps the suggested name
         assertNull(c.finish());
         assertEquals("mainnet_02", ctx.getName());
         assertTrue(ctx.isStartImmediately());
@@ -160,11 +188,14 @@ class NodeSetupWizardControllerTest {
 
     /** The canonical chain with sandbox-bound DB steps (no real panels / disk checks). */
     private static List<WizardStep> defaultStepsForTest() {
+        NodeConfigurationStep nodeConfig = new NodeConfigurationStep(); // no disk writes: virtual in-memory profile
         return Arrays.asList(
+                new ProfileNameStep(() -> new HashSet<>()),
                 new DatabaseSelectionStep(),
                 new DatabaseInstallationStep(e -> new JPanel(), e -> false),
                 new DatabaseConnectionStep(),
-                new NodeConfigurationStep(() -> new HashSet<>()),
+                nodeConfig,
+                new LoggingSelectionStep(),
                 new SummaryStep());
     }
 
@@ -173,15 +204,15 @@ class NodeSetupWizardControllerTest {
     void visibleStepCountAdaptsToEngine() {
         NodeSetupWizardController c = new NodeSetupWizardController(defaultStepsForTest());
         // The context's engine is live-bound from the preselected radio (SQLite)
-        // → only 3 steps are actually walked.
-        assertEquals(3, c.getVisibleStepCount());
+        // → only 5 steps are actually walked.
+        assertEquals(5, c.getVisibleStepCount());
         assertEquals(1, c.getCurrentVisibleIndex());
-        assertEquals(Arrays.asList("database-selection", "database-connection", "node-configuration"),
+        assertEquals(Arrays.asList("profile-name", "database-selection", "database-connection", "node-configuration", "logging-selection"),
                 c.effectiveSteps().stream().map(WizardStep::getId).toList());
 
-        // A server engine walks all five steps.
+        // A server engine walks all seven steps.
         c.getContext().setEngine(DatabaseEngine.MARIADB);
-        assertEquals(5, c.getVisibleStepCount());
+        assertEquals(7, c.getVisibleStepCount());
         assertEquals(1, c.getCurrentVisibleIndex());
     }
 
@@ -189,13 +220,21 @@ class NodeSetupWizardControllerTest {
     @DisplayName("the visible index tracks the walked (non-skipped) position")
     void visibleIndexTracksNavigation() {
         NodeSetupWizardController c = new NodeSetupWizardController(defaultStepsForTest());
-        assertNull(c.next()); // SQLite: installation + summary auto-skipped
-        assertEquals("database-connection", c.currentStep().getId());
+        assertEquals("profile-name", c.currentStep().getId());
+        assertEquals(1, c.getCurrentVisibleIndex());
+        assertNull(c.next());
+        assertEquals("database-selection", c.currentStep().getId());
         assertEquals(2, c.getCurrentVisibleIndex());
-        assertEquals(3, c.getVisibleStepCount());
+        assertNull(c.next()); // SQLite: installation auto-skipped
+        assertEquals("database-connection", c.currentStep().getId());
+        assertEquals(3, c.getCurrentVisibleIndex());
         assertNull(c.next()); // node configuration — the LAST visible step for SQLite
         assertEquals("node-configuration", c.currentStep().getId());
-        assertEquals(3, c.getCurrentVisibleIndex());
+        assertEquals(4, c.getCurrentVisibleIndex());
+
+        assertNull(c.next());
+        assertEquals("logging-selection", c.currentStep().getId());
+        assertEquals(5, c.getCurrentVisibleIndex());
         assertTrue(c.isLastStep());
     }
 
@@ -222,17 +261,17 @@ class NodeSetupWizardControllerTest {
         NodeSetupWizardController c = new NodeSetupWizardController(defaultStepsForTest());
         AtomicInteger fired = new AtomicInteger();
         c.addChangeListener(ctx -> fired.incrementAndGet());
-        assertEquals(3, c.getVisibleStepCount(), "SQLite (preselected) → 3 visible steps");
+        assertEquals(5, c.getVisibleStepCount(), "SQLite (preselected) → 5 visible steps");
 
-        DatabaseSelectionStep selection = (DatabaseSelectionStep) c.getSteps().get(0);
+        DatabaseSelectionStep selection = (DatabaseSelectionStep) c.getSteps().get(1);
         findRadio(selection.getPanel(), "MariaDB").doClick();
         assertEquals(DatabaseEngine.MARIADB, c.getContext().getEngine());
-        assertEquals(5, c.getVisibleStepCount(), "server engine → all five steps are visible");
+        assertEquals(7, c.getVisibleStepCount(), "server engine → all seven steps are visible");
         assertEquals(1, fired.get());
 
         findRadio(selection.getPanel(), "SQLite").doClick();
         assertEquals(DatabaseEngine.SQLITE, c.getContext().getEngine());
-        assertEquals(3, c.getVisibleStepCount(), "back to SQLite → installation + summary drop out again");
+        assertEquals(5, c.getVisibleStepCount(), "back to SQLite → installation + summary drop out again");
         assertEquals(2, fired.get());
 
         findRadio(selection.getPanel(), "SQLite").doClick(); // same selection → no event

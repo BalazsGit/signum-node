@@ -9,7 +9,6 @@ import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.nio.file.Paths;
 import java.util.Collections;
 
 import javax.swing.SwingUtilities;
@@ -17,6 +16,7 @@ import javax.swing.SwingUtilities;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import application.module.node.BlockchainProcessor;
 import application.module.node.NodeModule;
@@ -50,6 +50,8 @@ class NodeProfilePanelLateBindingTest {
     private NodeProfilePanel panel;
     private BlockchainProcessor processorMock;
 
+    @TempDir static java.nio.file.Path confRoot;
+
     private String newProfileName(String prefix) {
         return prefix + "-" + System.nanoTime();
     }
@@ -61,7 +63,7 @@ class NodeProfilePanelLateBindingTest {
      */
     private void buildLateStartFixture(String name) {
         profile = new NodeProfile(name);
-        signum = new Signum(profile, Paths.get("./conf"));
+        signum = new Signum(profile, confRoot);
         NodeModule.getInstance().addNode(signum);
         panel = new NodeProfilePanel(null, profile, null);
     }
@@ -123,7 +125,7 @@ class NodeProfilePanelLateBindingTest {
     @DisplayName("wizard 'start immediately' path (panel constructed with the Signum): RUNNING push wires the bottom panel")
     void wizardStartImmediately_runningPushWiresBottomPanel() throws Exception {
         profile = new NodeProfile(newProfileName("wizard-start"));
-        signum = new Signum(profile, Paths.get("./conf"));
+        signum = new Signum(profile, confRoot);
         NodeModule.getInstance().addNode(signum);
         // NodePanel.addProfileTab → lazy load resolves the registry entry, so the panel
         // is constructed WITH the Signum (startNode registered it before the tab existed).

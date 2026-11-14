@@ -20,6 +20,7 @@ import java.util.function.IntConsumer;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -194,6 +195,11 @@ class BrowserTabPaneTest {
             assertTrue(trailing.getComponent(0) instanceof javax.swing.JButton button
                             && button == pane.newTabButton(),
                     "the trailing container must hold the new-tab button");
+            assertNotNull(pane.newTabButton().getIcon(), "the new-tab '+' must carry its glyph");
+            assertNull(pane.newTabButton().getRolloverIcon(),
+                    "the new-tab '+' must be a static glyph (no grow-on-hover): the surrounding "
+                            + "tabs / close-X don't grow, so neither does the '+' — grow-on-hover "
+                            + "is reserved for the configuration-panel function buttons");
         }
 
         @Test

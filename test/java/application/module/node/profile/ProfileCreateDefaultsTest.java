@@ -125,12 +125,14 @@ class ProfileCreateDefaultsTest {
     }
 
     @Test
-    @DisplayName("ensureSqliteDatabaseProfile ignores blank names and non-SQLite URLs (never throws)")
+    @DisplayName("ensureSqliteDatabaseProfile ignores invalid names and URLs (never throws)")
     void ensureSqliteDatabaseProfileIgnoresInvalid() {
         String name = "e2e_probe_" + System.nanoTime();
         ProfileCreateDefaults.ensureSqliteDatabaseProfile("", ProfileCreateDefaults.sqliteDbUrl(name));
         ProfileCreateDefaults.ensureSqliteDatabaseProfile(null, ProfileCreateDefaults.sqliteDbUrl(name));
         ProfileCreateDefaults.ensureSqliteDatabaseProfile(name, "jdbc:mariadb://localhost:3306/signum");
+        ProfileCreateDefaults.ensureSqliteDatabaseProfile(name,
+                "jdbc:sqlite:file:./database/SQLite/" + name + "/ledger.data");
         assertFalse(Files.exists(sqliteProfileDir(name)), "no profile may be created for invalid input");
     }
 

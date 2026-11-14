@@ -6,8 +6,8 @@ import application.module.node.profile.NodeProfile;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
-import java.nio.file.Paths;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -22,6 +22,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class NodeCommandHandlerTest {
 
     private static final String PROFILE = "node-cmd-handler-test-" + System.nanoTime();
+
+    @TempDir static java.nio.file.Path confRoot;
 
     private NodeModule module() {
         return NodeModule.getInstance();
@@ -53,7 +55,7 @@ class NodeCommandHandlerTest {
     @Test
     @DisplayName("handle() dispatches a known verb to the registered node")
     void dispatchKnownVerb() {
-        module().addNode(new Signum(new NodeProfile(PROFILE), Paths.get("./conf")));
+        module().addNode(new Signum(new NodeProfile(PROFILE), confRoot));
 
         CommandResult r = new NodeCommandHandler("pause").handle(ctx(owner(), List.of()));
 
@@ -63,7 +65,7 @@ class NodeCommandHandlerTest {
     @Test
     @DisplayName("handle() forwards the argument in the legacy '.verb arg' form")
     void forwardsArgument() {
-        module().addNode(new Signum(new NodeProfile(PROFILE), Paths.get("./conf")));
+        module().addNode(new Signum(new NodeProfile(PROFILE), confRoot));
 
         CommandResult r = new NodeCommandHandler("popoff").handle(ctx(owner(), List.of("10")));
 

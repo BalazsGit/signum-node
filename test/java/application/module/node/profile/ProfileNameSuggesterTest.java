@@ -56,9 +56,9 @@ class ProfileNameSuggesterTest {
     }
 
     @Test
-    @DisplayName("nextAvailable never returns a reserved name")
-    void nextAvailable_NeverReserved() {
-        assertEquals("node-default_01",
+    @DisplayName("nextAvailable returns the base when it is free (2-layer: no reserved names)")
+    void nextAvailable_BaseFree_ReturnsBase() {
+        assertEquals("node-default",
                 ProfileNameSuggester.nextAvailableName("node-default", Set.of()));
     }
 

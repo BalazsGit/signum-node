@@ -16,27 +16,24 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ReservedNamesTest {
 
     @Test
-    @DisplayName("node reserved names cover the canonical L1 name and both legacy template names")
-    void nodeReservedNames_CoverCanonicalAndLegacyNames() {
-        assertTrue(ReservedNames.NODE_RESERVED_NAMES.contains("default"));
-        assertTrue(ReservedNames.NODE_RESERVED_NAMES.contains("node-default"));
-        assertTrue(ReservedNames.NODE_RESERVED_NAMES.contains("logging-default"));
-        assertFalse(ReservedNames.NODE_RESERVED_NAMES.contains("mainnet"));
-        assertTrue(ReservedNames.isNodeReservedName("default"));
+    @DisplayName("node reserved names are empty in the 2-layer architecture")
+    void nodeReservedNames_AreEmpty() {
+        assertTrue(ReservedNames.NODE_RESERVED_NAMES.isEmpty());
+        assertFalse(ReservedNames.NODE_RESERVED_NAMES.contains("default"));
+        assertFalse(ReservedNames.NODE_RESERVED_NAMES.contains("node-default"));
+        assertFalse(ReservedNames.NODE_RESERVED_NAMES.contains("logging-default"));
+        assertFalse(ReservedNames.isNodeReservedName("default"));
         assertFalse(ReservedNames.isNodeReservedName(null));
-        assertFalse(ReservedNames.isNodeReservedName("my-custom-default"));
     }
 
     @Test
-    @DisplayName("logging reserved names cover the canonical L1 name and the legacy template name")
-    void loggingReservedNames_CoverCanonicalAndLegacyNames() {
-        assertTrue(ReservedNames.LOGGING_RESERVED_NAMES.contains("default"));
-        assertTrue(ReservedNames.LOGGING_RESERVED_NAMES.contains("logging-default"));
-        assertTrue(ReservedNames.LOGGING_RESERVED_NAMES.contains("system-default"),
-                "the system L0 template name must be reserved (excluded from discovery)");
-        assertFalse(ReservedNames.LOGGING_RESERVED_NAMES.contains("node-default"));
-        assertTrue(ReservedNames.isLoggingReservedName("default"));
-        assertFalse(ReservedNames.isLoggingReservedName("verbose"));
+    @DisplayName("logging reserved names are empty in the 2-layer architecture")
+    void loggingReservedNames_AreEmpty() {
+        assertTrue(ReservedNames.LOGGING_RESERVED_NAMES.isEmpty());
+        assertFalse(ReservedNames.LOGGING_RESERVED_NAMES.contains("default"));
+        assertFalse(ReservedNames.LOGGING_RESERVED_NAMES.contains("logging-default"));
+        assertFalse(ReservedNames.LOGGING_RESERVED_NAMES.contains("system-default"));
+        assertFalse(ReservedNames.isLoggingReservedName("default"));
         assertFalse(ReservedNames.isLoggingReservedName(null));
     }
 
