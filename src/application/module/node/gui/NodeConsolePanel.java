@@ -79,6 +79,7 @@ import javax.swing.JTextPane;
 import javax.swing.LookAndFeel;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.SwingWorker;
 import javax.swing.Timer;
 import javax.swing.UIManager;
 import javax.swing.JPopupMenu;
@@ -93,8 +94,6 @@ import javax.swing.text.StyleConstants;
 import javax.swing.text.StyledDocument;
 import java.net.URL;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
 
@@ -161,7 +160,28 @@ public class NodeConsolePanel extends JPanel {
 
     private static final int ANIMATION_DURATION_MS = 250;
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(NodeConsolePanel.class);
+    /**
+     * F5 (node.gui hybrid routing, Q7/D7): this per-node view component logs on the
+     * owned node's isolated {@code NodeLoggers} (node context) once a {@link Signum} is
+     * attached; otherwise (late binding / headless) it falls back to the class-based
+     * (global) logger. The node-context &rarr; System Console forward path is unchanged.
+     */
+    private org.apache.logging.log4j.Logger nodeContextLogger() {
+        Signum s = this.signum;
+        if (s != null) {
+            return s.loggers().forClass(NodeConsolePanel.class);
+        }
+        return org.apache.logging.log4j.LogManager.getLogger(NodeConsolePanel.class);
+    }
+
+    /**
+     * Static-context counterpart of {@link #nodeContextLogger()}: the <b>global</b> log4j logger,
+     * for static members (e.g. {@code TextAreaOutputStream.maybeScrollToEnd}) that have no instance
+     * and therefore no owned {@link Signum}.
+     */
+    private static org.apache.logging.log4j.Logger staticLogger() {
+        return org.apache.logging.log4j.LogManager.getLogger(NodeConsolePanel.class);
+    }
 
     /**
      * P8/F4: this panel's node-relevant messages route to the profile's own
@@ -290,7 +310,7 @@ public class NodeConsolePanel extends JPanel {
                 sb.append("\n  ").append(key).append(": null");
             }
         }
-        LOGGER.info(sb.toString());
+        staticLogger().info(sb.toString());
     }
 
     private void updateCustomComponents() {
@@ -443,6 +463,13 @@ public class NodeConsolePanel extends JPanel {
     private volatile Signum listenerOwner;
     private JPanel metricsPanelWrapper;
     private Timer metricsPanelAnimator;
+    /** True while the heavy MetricsPanel is being constructed on a background thread. */
+    private volatile boolean metricsPanelLoading = false;
+    /**
+     * Bumped on every dispose so an in-flight background construction invalidates its
+     * result ({@code done()} discards a stale panel if the node stopped/restarted meanwhile).
+     */
+    private volatile int metricsPanelGeneration = 0;
     private CustomDrawingComponent popOffToggle;
     private JButton menuButton;
     private JButton globeButton;
@@ -611,7 +638,7 @@ public class NodeConsolePanel extends JPanel {
         JButton sourceButton = (triggerButton != null) ? triggerButton : menuButton;
         Window ownerWindow = SwingUtilities.getWindowAncestor(sourceButton);
         if (ownerWindow == null) {
-            LOGGER.warn("Could not determine owner window for menu popup");
+            nodeContextLogger().warn("Could not determine owner window for menu popup");
             return;
         }
 
@@ -847,7 +874,7 @@ public class NodeConsolePanel extends JPanel {
                 localConfFolder = cmd.getOptionValue(Signum.CONF_FOLDER_OPTION.getOpt());
             }
         } catch (Exception e) {
-            LOGGER.error("Error parsing command line arguments for config folder", e);
+            nodeContextLogger().error("Error parsing command line arguments for config folder", e);
         }
         this.confFolder = localConfFolder;
 
@@ -876,7 +903,7 @@ public class NodeConsolePanel extends JPanel {
                 ge.registerFont(Font.createFont(Font.TRUETYPE_FONT, fontStream));
             }
         } catch (Exception e) {
-            LOGGER.warn("Could not register FontAwesome for HTML rendering", e);
+            nodeContextLogger().warn("Could not register FontAwesome for HTML rendering", e);
         }
 
         // ── UnifiedConsolePanel creation (replaces direct JTextPane + ProfileConsoleSubscriber) ──
@@ -1252,9 +1279,9 @@ public class NodeConsolePanel extends JPanel {
 
         showMetricsItem = new JCheckBox("Show Metrics Panel");
         showMetricsItem.setSelected(showMetricsPanel);
-        LOGGER.debug("[DEBUG-MetricsPanel] ==== hamburger checkbox created ===== initial selected={}", showMetricsPanel);
+        nodeContextLogger().debug("[DEBUG-MetricsPanel] ==== hamburger checkbox created ===== initial selected={}", showMetricsPanel);
         showMetricsItem.addActionListener(e -> {
-            LOGGER.debug("[DEBUG-MetricsPanel] ==== HAMBURGER CHECKBOX CLICKED ===== new checked={}", showMetricsItem.isSelected());
+            nodeContextLogger().debug("[DEBUG-MetricsPanel] ==== HAMBURGER CHECKBOX CLICKED ===== new checked={}", showMetricsItem.isSelected());
             updateMetricsPanelState(showMetricsItem.isSelected());
         });
         styleMenuComponent(showMetricsItem);
@@ -1280,7 +1307,7 @@ public class NodeConsolePanel extends JPanel {
                 }
             }
         } catch (Exception ex) {
-            LOGGER.warn("Could not load autostart setting for profile '{}'", profileName, ex);
+            nodeContextLogger().warn("Could not load autostart setting for profile '{}'", profileName, ex);
         }
         autostartItem.setSelected(autostartValue);
         autostartItem.addActionListener(e -> {
@@ -1309,9 +1336,9 @@ public class NodeConsolePanel extends JPanel {
                     writer.write(gson.toJson(settings));
                 }
             } catch (Exception ex) {
-                LOGGER.warn("Could not save autostart setting for profile '{}'", profileName, ex);
+                nodeContextLogger().warn("Could not save autostart setting for profile '{}'", profileName, ex);
             }
-            LOGGER.info("Auto-start setting for profile '{}' changed to {}", profileName, newValue);
+            nodeContextLogger().info("Auto-start setting for profile '{}' changed to {}", profileName, newValue);
         });
         autostartItem.setToolTipText("When checked, this node profile will start automatically when the application launches");
         styleMenuComponent(autostartItem);
@@ -1708,35 +1735,35 @@ public class NodeConsolePanel extends JPanel {
                         try {
                             elapsedTimeTimer.stop();
                         } catch (Throwable t) {
-                            LOGGER.warn("Error stopping elapsed time timer", t);
+                            nodeContextLogger().warn("Error stopping elapsed time timer", t);
                         }
                     }
                     if (guiTimer != null) {
                         try {
                             guiTimer.stop();
                         } catch (Throwable t) {
-                            LOGGER.warn("Error stopping GUI timer", t);
+                            nodeContextLogger().warn("Error stopping GUI timer", t);
                         }
                     }
                     if (popOffAnimator != null) {
                         try {
                             popOffAnimator.stop();
                         } catch (Throwable t) {
-                            LOGGER.warn("Error stopping popOff animator", t);
+                            nodeContextLogger().warn("Error stopping popOff animator", t);
                         }
                     }
                     if (metricsPanelAnimator != null) {
                         try {
                             metricsPanelAnimator.stop();
                         } catch (Throwable t) {
-                            LOGGER.warn("Error stopping metricsPanel animator", t);
+                            nodeContextLogger().warn("Error stopping metricsPanel animator", t);
                         }
                     }
                     if (menuPopupController != null && menuPopupController.isOpen()) {
                         try {
                             menuPopupController.hide();
                         } catch (Throwable t) {
-                            LOGGER.warn("Error hiding menu popup", t);
+                            nodeContextLogger().warn("Error hiding menu popup", t);
                         }
                     }
 
@@ -1744,7 +1771,7 @@ public class NodeConsolePanel extends JPanel {
                         try {
                             metricsPanel.shutdown();
                         } catch (Throwable t) {
-                            LOGGER.warn("Error shutting down metrics panel", t);
+                            nodeContextLogger().warn("Error shutting down metrics panel", t);
                         }
                     }
 
@@ -1764,14 +1791,14 @@ public class NodeConsolePanel extends JPanel {
                         }
                         NodeConsolePanel.this.signum = null;
                     } catch (Throwable t) {
-                        LOGGER.error("Unexpected error during Signum core shutdown", t);
+                        nodeContextLogger().error("Unexpected error during Signum core shutdown", t);
                     }
 
                     if (trayIcon != null && SystemTray.isSupported()) {
                         try {
                             SystemTray.getSystemTray().remove(trayIcon);
                         } catch (Throwable t) {
-                            LOGGER.warn("Error removing tray icon", t);
+                            nodeContextLogger().warn("Error removing tray icon", t);
                         }
                     }
 
@@ -1862,7 +1889,7 @@ public class NodeConsolePanel extends JPanel {
         // Guard against null parentFrame (can happen in multi-profile mode when NodeConsolePanel
         // is embedded in a NodeProfilePanel tab rather than a standalone JFrame).
         if (parentFrame == null) {
-            LOGGER.warn("parentFrame is null - skipping tray icon creation");
+            nodeContextLogger().warn("parentFrame is null - skipping tray icon creation");
             return null;
         }
 
@@ -1915,7 +1942,7 @@ public class NodeConsolePanel extends JPanel {
 
             return newTrayIcon;
         } catch (Exception e) {
-            LOGGER.info("Could not create tray icon");
+            nodeContextLogger().info("Could not create tray icon");
             return null;
         }
     }
@@ -2063,7 +2090,7 @@ public class NodeConsolePanel extends JPanel {
                                     finalLimitHeight, finalLastTrimHeight);
                         });
                     } catch (Exception ex) {
-                        LOGGER.error("Error during DB check", ex);
+                        nodeContextLogger().error("Error during DB check", ex);
                         SwingUtilities.invokeLater(() -> {
                             if (waitDialog.isDisplayable()) {
                                 rotatingIcon.stop();
@@ -2202,7 +2229,7 @@ public class NodeConsolePanel extends JPanel {
     }
     /*
      * private void popOff(int blocks) {
-     * LOGGER.info("Pop off requested, this can take a while...");
+     * nodeContextLogger().info("Pop off requested, this can take a while...");
      * int height = blocks > 0 ? Signum.getBlockchain().getLastBlock().getHeight() -
      * blocks
      * : Signum.getBlockchainProcessor().getMinRollbackHeight();
@@ -2211,7 +2238,7 @@ public class NodeConsolePanel extends JPanel {
      */
 
     private void popOff(int count) {
-        // LOGGER.info("Pop off requested, this can take a while...");
+        // nodeContextLogger().info("Pop off requested, this can take a while...");
         if (getSignum().getBlockchainProcessor() == null) {
             showMessage("Blockchain processor not initialized.");
             return;
@@ -2276,7 +2303,7 @@ public class NodeConsolePanel extends JPanel {
         try {
             Desktop.getDesktop().open(file);
         } catch (IOException e) {
-            LOGGER.error("Could not open conf file with default editor", e);
+            nodeContextLogger().error("Could not open conf file with default editor", e);
         }
     }
 
@@ -2289,11 +2316,11 @@ public class NodeConsolePanel extends JPanel {
             try {
                 Desktop.getDesktop().browse(new URI(address));
             } catch (Exception e) { // Catches parse exception or exception when opening browser
-                LOGGER.error("Could not open browser", e);
+                nodeContextLogger().error("Could not open browser", e);
                 showMessage("Error opening web UI. Please open your browser and navigate to " + address);
             }
         } catch (Exception e) { // Catches error accessing PropertyService
-            LOGGER.error("Could not access PropertyService", e);
+            nodeContextLogger().error("Could not access PropertyService", e);
             showMessage("Could not open web UI as could not read the configuration file.");
         }
     }
@@ -2670,9 +2697,9 @@ public class NodeConsolePanel extends JPanel {
         application.module.system.CommandRouter.Result result =
                 application.module.system.CommandRouter.route(cmd, profileName);
         if (result.isOk()) {
-            LOGGER.info("[Command] {}", result.getMessage());
+            nodeContextLogger().info("[Command] {}", result.getMessage());
         } else {
-            LOGGER.warn("[Command] {}", result.getMessage());
+            nodeContextLogger().warn("[Command] {}", result.getMessage());
         }
     }
 
@@ -2723,7 +2750,7 @@ public class NodeConsolePanel extends JPanel {
             nodeLogger().info("Attached console subscriber to ProfileLogger '" + attachedName + "' for profile '" + attachedProfile + "'");
             profileLoggerAttached = true;
         } catch (Exception e) {
-            LOGGER.error("Failed to attach console subscriber to ProfileLogger for profile '{}'", profileName, e);
+            nodeContextLogger().error("Failed to attach console subscriber to ProfileLogger for profile '{}'", profileName, e);
         }
     }
 
@@ -2745,7 +2772,7 @@ public class NodeConsolePanel extends JPanel {
             try {
                 pl = ctx.getProfileLogger();
             } catch (Exception e) {
-                LOGGER.debug("resolveProfileLogger: getProfileLogger() threw for profile '{}'", profileName);
+                nodeContextLogger().debug("resolveProfileLogger: getProfileLogger() threw for profile '{}'", profileName);
             }
         }
         // v4 single-path logging: only the owning Signum's ProfileLogger is valid.
@@ -2780,7 +2807,7 @@ public class NodeConsolePanel extends JPanel {
         // (start pending) — skip; the GUI already shows the STARTING transition
         // (spinner + disabled Start) via the NodeModule pending set.
         if (NodeModule.getInstance().isStartPending(this.profileName)) {
-            LOGGER.info("Start already pending for profile '{}' — skipping startSignumWithGUI", profileName);
+            nodeContextLogger().info("Start already pending for profile '{}' — skipping startSignumWithGUI", profileName);
             return;
         }
         Signum ctx = null;
@@ -2798,7 +2825,7 @@ public class NodeConsolePanel extends JPanel {
                 ctx = NodeModule.getInstance().startNode(this.profileName);
             }
         } catch (Exception e) {
-            LOGGER.error("Signum startup failed for profile '{}': {}", profileName, e.getMessage(), e);
+            nodeContextLogger().error("Signum startup failed for profile '{}': {}", profileName, e.getMessage(), e);
         }
         if (ctx != null) {
             this.signum = ctx;
@@ -2810,14 +2837,14 @@ public class NodeConsolePanel extends JPanel {
                 try {
                     adoption.accept(ctx);
                 } catch (Exception ex) {
-                    LOGGER.warn("Signum adoption callback failed for profile '{}': {}", profileName, ex.getMessage());
+                    nodeContextLogger().warn("Signum adoption callback failed for profile '{}': {}", profileName, ex.getMessage());
                 }
             }
         }
         attachProfileLogger();
         loadGuiSettings();
         if (this.signum == null) {
-            LOGGER.warn("startSignumWithGUI: no Signum available for profile '{}' — skipping runtime settings", profileName);
+            nodeContextLogger().warn("startSignumWithGUI: no Signum available for profile '{}' — skipping runtime settings", profileName);
             return;
         }
         try {
@@ -2954,7 +2981,7 @@ public class NodeConsolePanel extends JPanel {
                     onBrsStopped();
                 }
             } catch (Exception t) {
-                LOGGER.error("Could not determine if running in testnet mode", t);
+                nodeContextLogger().error("Could not determine if running in testnet mode", t);
             }
             } catch (Exception t) {
                 showMessage(FAILED_TO_START_MESSAGE);
@@ -2964,7 +2991,7 @@ public class NodeConsolePanel extends JPanel {
                 try {
                     loadGuiSettings();
                     } catch (Exception loadEx) {
-                    LOGGER.warn("Could not load GUI settings during fallback", loadEx);
+                    nodeContextLogger().warn("Could not load GUI settings during fallback", loadEx);
                 }
                 SwingUtilities.invokeLater(() -> {
                     // Apply panel visibility state first (before tray icon) to ensure MetricsPanel shows correctly
@@ -2973,7 +3000,7 @@ public class NodeConsolePanel extends JPanel {
                     try {
                         showTrayIcon();
                     } catch (Exception e) {
-                        LOGGER.warn("Failed to show tray icon during fallback (non-fatal)", e);
+                        nodeContextLogger().warn("Failed to show tray icon during fallback (non-fatal)", e);
                     }
                 });
             }
@@ -3052,7 +3079,7 @@ public class NodeConsolePanel extends JPanel {
         try {
             return NodeModule.getInstance().get(profileName);
         } catch (Exception e) {
-            LOGGER.debug("resolveBoundSignum: registry lookup failed for profile '{}'", profileName, e);
+            nodeContextLogger().debug("resolveBoundSignum: registry lookup failed for profile '{}'", profileName, e);
             return null;
         }
     }
@@ -3093,7 +3120,7 @@ public class NodeConsolePanel extends JPanel {
                 // runs the processor must exist. A null here is a genuine bug, not a
                 // transient startup state — surface it as an error. Do NOT mark this
                 // instance as wired.
-                LOGGER.error("[{}] ensureRuntimeWiring: invariant violation — BlockchainProcessor is null in state RUNNING", profileName);
+                nodeContextLogger().error("[{}] ensureRuntimeWiring: invariant violation — BlockchainProcessor is null in state RUNNING", profileName);
                 return;
             }
             // v4 toolbar-start path: the feature flags (measurement/experimental/
@@ -3127,7 +3154,7 @@ public class NodeConsolePanel extends JPanel {
             });
             nodeLogger().info("[" + profileName + "] Runtime listeners wired — Latest block / peer / volume labels active");
         } catch (Exception e) {
-            LOGGER.error("[{}] ensureRuntimeWiring failed", profileName, e);
+            nodeContextLogger().error("[{}] ensureRuntimeWiring failed", profileName, e);
         }
     }
 
@@ -3177,8 +3204,8 @@ public class NodeConsolePanel extends JPanel {
         if (bound != null) {
             return new MetricsPanel(parentFrame, new MetricsPanelContext(bound));
         }
-        LOGGER.warn("[MetricsPanel] Created without profile context for profile '{}' (node not started yet) — data will not load until it is recreated", profileName);
-        return new MetricsPanel(parentFrame);
+        nodeContextLogger().warn("[MetricsPanel] Created without profile context for profile '{}' (node not started yet) — data will not load until it is recreated", profileName);
+        return new MetricsPanel(parentFrame, null);
     }
 
     /**
@@ -3192,17 +3219,19 @@ public class NodeConsolePanel extends JPanel {
      * </p>
      */
     private void disposeStaleMetricsPanel() {
+        // Invalidate any in-flight background construction so its done() discards the result.
+        metricsPanelGeneration++;
         if (metricsPanel == null) {
             return;
         }
         if (metricsPanelAnimator != null && metricsPanelAnimator.isRunning()) {
-            LOGGER.debug("[MetricsPanel] Animator running — stale panel will be recreated on next show");
+            nodeContextLogger().debug("[MetricsPanel] Animator running — stale panel will be recreated on next show");
             return;
         }
         try {
             metricsPanel.shutdown();
         } catch (Exception e) {
-            LOGGER.warn("[MetricsPanel] Error shutting down MetricsPanel for profile '{}'", profileName, e);
+            nodeContextLogger().warn("[MetricsPanel] Error shutting down MetricsPanel for profile '{}'", profileName, e);
         }
         metricsPanelWrapper.remove(metricsPanel);
         metricsPanelWrapper.revalidate();
@@ -3211,17 +3240,17 @@ public class NodeConsolePanel extends JPanel {
     }
 
     private void updateMetricsPanelState(boolean show) {
-        LOGGER.debug("[DEBUG-MetricsPanel] ==== updateMetricsPanelState(show={}) CALLED ===== thread={}, showMetricsPanel={}, metricsPanel={}, animatorRunning={}",
+        nodeContextLogger().debug("[DEBUG-MetricsPanel] ==== updateMetricsPanelState(show={}) CALLED ===== thread={}, showMetricsPanel={}, metricsPanel={}, animatorRunning={}",
             show, Thread.currentThread().getName(), showMetricsPanel, metricsPanel != null ? "exists" : "null",
             metricsPanelAnimator != null && metricsPanelAnimator.isRunning());
 
         if (metricsPanelAnimator != null && metricsPanelAnimator.isRunning()) {
-            LOGGER.warn("[DEBUG-MetricsPanel] updateMetricsPanelState: ABORTING — animator already running!");
+            nodeContextLogger().warn("[DEBUG-MetricsPanel] updateMetricsPanelState: ABORTING — animator already running!");
             return;
         }
 
         showMetricsPanel = show;
-        LOGGER.debug("[DEBUG-MetricsPanel] updateMetricsPanelState: showMetricsPanel={}", showMetricsPanel);
+        nodeContextLogger().debug("[DEBUG-MetricsPanel] updateMetricsPanelState: showMetricsPanel={}", showMetricsPanel);
 
         // Get SmartScrollController from unifiedConsole's subscriber to suppress events during animation.
         final SmartScrollController scrollController;
@@ -3233,7 +3262,7 @@ public class NodeConsolePanel extends JPanel {
 
         // Suppress scrollbar adjustment events so viewport resize doesn't corrupt SmartScrollController state
         boolean wasSuppressing = scrollController != null && scrollController.setSuppressingEvents(true);
-        LOGGER.debug("[DEBUG-MetricsPanel] SmartScrollController suppression activated: wasSuppressing={}, controller={}",
+        nodeContextLogger().debug("[DEBUG-MetricsPanel] SmartScrollController suppression activated: wasSuppressing={}, controller={}",
                 wasSuppressing, scrollController != null ? "exists" : "null");
 
         if (show) {
@@ -3245,11 +3274,20 @@ public class NodeConsolePanel extends JPanel {
             // live node instead of the stale instance.
             Signum boundForCheck = resolveBoundSignum();
             if (metricsPanel != null && boundForCheck != null && metricsPanel.getSignum() != boundForCheck) {
-                LOGGER.info("[MetricsPanel] Recreating panel — bound context {} does not match current Signum for profile '{}'",
+                nodeContextLogger().info("[MetricsPanel] Recreating panel — bound context {} does not match current Signum for profile '{}'",
                         metricsPanel.getSignum(), profileName);
                 disposeStaleMetricsPanel();
             }
             if (metricsPanel == null) {
+                if (metricsPanelLoading) {
+                    // A background construction is already in flight — its done() will
+                    // reveal the panel. Restore the top-level suppression since we return
+                    // without running the animation.
+                    if (scrollController != null) {
+                        scrollController.setSuppressingEvents(wasSuppressing);
+                    }
+                    return;
+                }
                 // The GUI is the presentation layer: the panel is ALWAYS created on
                 // request, regardless of node state. With a stopped/unavailable
                 // Signum the child panels simply initialise in an empty state (their
@@ -3257,69 +3295,64 @@ public class NodeConsolePanel extends JPanel {
                 // database) — active data features are unavailable until the node is
                 // running, but the component itself keeps working. It is only
                 // replaced when the Signum instance changes (restart) or on app exit.
-                metricsPanel = createMetricsPanel();
-                // Wire ExpansionListener so that chevron toggle updates our tracked state
-                metricsPanel.setExpansionListener(expanded -> this.metricsExpanded = expanded);
-                metricsPanel.init();
-                metricsPanel.setVisible(true);
-                metricsPanelWrapper.add(metricsPanel, BorderLayout.CENTER);
+                //
+                // Building the panel (4 JFreeChart sub-panels) is heavy enough to freeze
+                // the whole window for ~15s if done synchronously on the EDT. So show a
+                // lightweight placeholder now, construct off the EDT, and reveal+animate
+                // on the EDT once ready (done()).
+                metricsPanelLoading = true;
+                final int generation = metricsPanelGeneration;
+                showMetricsLoadingPlaceholder();
+                // We return without animating — restore the top-level suppression; done()
+                // acquires + suppresses its own for the reveal animation.
+                if (scrollController != null) {
+                    scrollController.setSuppressingEvents(wasSuppressing);
+                }
+                new SwingWorker<MetricsPanel, Void>() {
+                    @Override
+                    protected MetricsPanel doInBackground() {
+                        // HEAVY: constructs MetricsPanel + its 4 JFreeChart sub-panels.
+                        return createMetricsPanel();
+                    }
+
+                    @Override
+                    protected void done() {
+                        metricsPanelLoading = false;
+                        // Discard if the node stopped/restarted, the panel was disposed,
+                        // or the user hid it while we were still building.
+                        if (generation != metricsPanelGeneration || metricsPanel != null || !showMetricsPanel) {
+                            return;
+                        }
+                        try {
+                            MetricsPanel mp = get();
+                            metricsPanel = mp;
+                            // Wire ExpansionListener so chevron toggle updates tracked state
+                            metricsPanel.setExpansionListener(expanded -> NodeConsolePanel.this.metricsExpanded = expanded);
+                            metricsPanel.init();
+                            metricsPanel.setVisible(true);
+                            metricsPanelWrapper.removeAll();
+                            metricsPanelWrapper.add(mp, BorderLayout.CENTER);
+                            SmartScrollController sc = (unifiedConsole != null && unifiedConsole.getSubscriber() != null)
+                                    ? unifiedConsole.getSubscriber().getScrollController() : null;
+                            boolean was = sc != null && sc.setSuppressingEvents(true);
+                            runMetricsRevealAnimation(sc, was);
+                        } catch (Exception ex) {
+                            nodeContextLogger().error("[MetricsPanel] Background construction failed", ex);
+                            metricsPanelWrapper.removeAll();
+                            metricsPanelWrapper.setPreferredSize(new Dimension(0, 0));
+                            metricsPanelWrapper.revalidate();
+                        }
+                    }
+                }.execute();
+                return;
             } else {
                 // Subsequent show: just make visible again (panel and timers already alive)
                 metricsPanel.setVisible(true);
             }
 
-            // Ensure layout is stabilised before measuring target height.
-            // Without this, the first-time preferredSize may be 0 because Swing has not
-            // performed a full layout pass on the newly added component tree.
-            if (metricsPanel != null) {
-                metricsPanel.ensureLayoutStability();
-            }
-
-            // Prepare for animation: Start from 0 height
-            metricsPanelWrapper.setPreferredSize(new Dimension(metricsPanelWrapper.getWidth(), 0));
-            metricsPanelWrapper.revalidate();
-
-            // Calculate target height after layout stabilisation
-            int rawTargetHeight = metricsPanel != null ? metricsPanel.getPreferredSize().height : 0;
-            final int animationTargetHeight;
-            if (rawTargetHeight <= 0) {
-                // Fallback: if preferred size is still unreliable, use a reasonable default
-                animationTargetHeight = 200;
-                LOGGER.warn("[DEBUG-MetricsPanel] targetHeight resolved to fallback {}: preferredSize was {}",
-                        animationTargetHeight, metricsPanel != null ? metricsPanel.getPreferredSize() : "null");
-            } else {
-                animationTargetHeight = rawTargetHeight;
-            }
-
-            metricsPanelAnimator = new Timer(10, new ActionListener() {
-                final long startTime = System.currentTimeMillis();
-                final int duration = ANIMATION_DURATION_MS;
-
-                @Override
-                public void actionPerformed(ActionEvent e) {
-                    long elapsed = System.currentTimeMillis() - startTime;
-                    float progress = Math.min(1.0f, (float) elapsed / duration);
-                    // Ease out: 1 - (1 - t)^3
-                    progress = 1.0f - (float) Math.pow(1.0f - progress, 3);
-
-                    int h = (int) (animationTargetHeight * progress);
-                    metricsPanelWrapper.setPreferredSize(new Dimension(metricsPanelWrapper.getWidth(), h));
-                    metricsPanelWrapper.revalidate();
-
-                    if (progress >= 1.0f) {
-                        ((Timer) e.getSource()).stop();
-                        metricsPanelAnimator = null;
-                        metricsPanelWrapper.setPreferredSize(null); // Reset to allow dynamic resizing
-                        metricsPanelWrapper.revalidate();
-                        // Restore SmartScrollController state after animation completes
-                        if (scrollController != null) {
-                            scrollController.setSuppressingEvents(wasSuppressing);
-                            LOGGER.debug("[DEBUG-MetricsPanel] SmartScrollController suppression restored after expand: wasSuppressing={}", wasSuppressing);
-                        }
-                    }
-                }
-            });
-            metricsPanelAnimator.start();
+            // Layout-stabilise + run the expand animation (shared by the synchronous
+            // path and the background path's done()).
+            runMetricsRevealAnimation(scrollController, wasSuppressing);
         } else {
             // TOGGLE HIDE: animate collapse, then setVisible(false).
             // The panel instance is kept alive so child timers continue running and we avoid
@@ -3354,7 +3387,7 @@ public class NodeConsolePanel extends JPanel {
                             // Restore SmartScrollController state after animation completes
                             if (scrollController != null) {
                                 scrollController.setSuppressingEvents(wasSuppressing);
-                                LOGGER.debug("[DEBUG-MetricsPanel] SmartScrollController suppression restored after collapse: wasSuppressing={}", wasSuppressing);
+                                nodeContextLogger().debug("[DEBUG-MetricsPanel] SmartScrollController suppression restored after collapse: wasSuppressing={}", wasSuppressing);
                             }
                         }
                     }
@@ -3367,6 +3400,85 @@ public class NodeConsolePanel extends JPanel {
                 }
             }
         }
+    }
+
+    /**
+     * Shows a lightweight "Loading…" placeholder in the metrics wrapper so the window
+     * stays responsive while the heavy MetricsPanel is being constructed on a
+     * background thread. Called on the EDT.
+     */
+    private void showMetricsLoadingPlaceholder() {
+        if (metricsPanelWrapper == null) {
+            return;
+        }
+        metricsPanelWrapper.removeAll();
+        JLabel loading = new JLabel("Loading metrics…", SwingConstants.CENTER);
+        loading.setOpaque(false);
+        metricsPanelWrapper.add(loading, BorderLayout.CENTER);
+        metricsPanelWrapper.setPreferredSize(new Dimension(metricsPanelWrapper.getWidth(), 48));
+        metricsPanelWrapper.revalidate();
+        metricsPanelWrapper.repaint();
+    }
+
+    /**
+     * Layout-stabilises the (already constructed) MetricsPanel and runs the expand
+     * animation. Must be called on the EDT. {@code scrollController} /
+     * {@code wasSuppressing} are the caller's already-acquired scroll controller + prior
+     * suppression state, restored when the animation finishes.
+     */
+    private void runMetricsRevealAnimation(SmartScrollController scrollController, boolean wasSuppressing) {
+        // Ensure layout is stabilised before measuring target height.
+        // Without this, the first-time preferredSize may be 0 because Swing has not
+        // performed a full layout pass on the newly added component tree.
+        if (metricsPanel != null) {
+            metricsPanel.ensureLayoutStability();
+        }
+
+        // Prepare for animation: Start from 0 height
+        metricsPanelWrapper.setPreferredSize(new Dimension(metricsPanelWrapper.getWidth(), 0));
+        metricsPanelWrapper.revalidate();
+
+        // Calculate target height after layout stabilisation
+        int rawTargetHeight = metricsPanel != null ? metricsPanel.getPreferredSize().height : 0;
+        final int animationTargetHeight;
+        if (rawTargetHeight <= 0) {
+            // Fallback: if preferred size is still unreliable, use a reasonable default
+            animationTargetHeight = 200;
+            nodeContextLogger().warn("[DEBUG-MetricsPanel] targetHeight resolved to fallback {}: preferredSize was {}",
+                    animationTargetHeight, metricsPanel != null ? metricsPanel.getPreferredSize() : "null");
+        } else {
+            animationTargetHeight = rawTargetHeight;
+        }
+
+        metricsPanelAnimator = new Timer(10, new ActionListener() {
+            final long startTime = System.currentTimeMillis();
+            final int duration = ANIMATION_DURATION_MS;
+
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                long elapsed = System.currentTimeMillis() - startTime;
+                float progress = Math.min(1.0f, (float) elapsed / duration);
+                // Ease out: 1 - (1 - t)^3
+                progress = 1.0f - (float) Math.pow(1.0f - progress, 3);
+
+                int h = (int) (animationTargetHeight * progress);
+                metricsPanelWrapper.setPreferredSize(new Dimension(metricsPanelWrapper.getWidth(), h));
+                metricsPanelWrapper.revalidate();
+
+                if (progress >= 1.0f) {
+                    ((Timer) e.getSource()).stop();
+                    metricsPanelAnimator = null;
+                    metricsPanelWrapper.setPreferredSize(null); // Reset to allow dynamic resizing
+                    metricsPanelWrapper.revalidate();
+                    // Restore SmartScrollController state after animation completes
+                    if (scrollController != null) {
+                        scrollController.setSuppressingEvents(wasSuppressing);
+                        nodeContextLogger().debug("[DEBUG-MetricsPanel] SmartScrollController suppression restored after expand: wasSuppressing={}", wasSuppressing);
+                    }
+                }
+            }
+        });
+        metricsPanelAnimator.start();
     }
 
     private void updateTimeLabelVisibility() {
@@ -3563,7 +3675,7 @@ public class NodeConsolePanel extends JPanel {
         try {
             checkpointHeight = ctx.getPropertyService().getInt(Props.NODE_CHECKPOINT_HEIGHT);
         } catch (Exception e) {
-            LOGGER.warn("updateVerificationStatus: cannot read checkpoint height for profile '{}'", profileName, e);
+            nodeContextLogger().warn("updateVerificationStatus: cannot read checkpoint height for profile '{}'", profileName, e);
             return;
         }
         boolean fullyVerified = lastBlock.getHeight() >= checkpointHeight;
@@ -3657,7 +3769,7 @@ public class NodeConsolePanel extends JPanel {
                 }
             }
         } catch (Exception e) {
-            LOGGER.warn("Could not load autostart setting for profile '{}'", profileName, e);
+            nodeContextLogger().warn("Could not load autostart setting for profile '{}'", profileName, e);
         }
         return false;
     }
@@ -3692,7 +3804,7 @@ public class NodeConsolePanel extends JPanel {
                 writer.write(gson.toJson(settings));
             }
         } catch (Exception e) {
-            LOGGER.error("Failed to save autostart setting for profile '{}'", profileName, e);
+            nodeContextLogger().error("Failed to save autostart setting for profile '{}'", profileName, e);
         }
     }
 
@@ -3808,10 +3920,10 @@ public class NodeConsolePanel extends JPanel {
                 createDefaultGuiSettings(settingsDir);
             }
         } catch (Exception e) {
-            LOGGER.warn("Could not load GUI settings for profile '{}'", profileName, e);
+            nodeContextLogger().warn("Could not load GUI settings for profile '{}'", profileName, e);
         }
 
-        LOGGER.info("[GUI-Settings] profile={}, showMetricsPanel: {}->{}, metricsExpanded: {}->{}, showCommandInput: {}->{}, commandPanelAtBottom: {}->{}",
+        nodeContextLogger().info("[GUI-Settings] profile={}, showMetricsPanel: {}->{}, metricsExpanded: {}->{}, showCommandInput: {}->{}, commandPanelAtBottom: {}->{}",
                 profileName, prevShowMetricsPanel, showMetricsPanel,
                 prevMetricsExpanded, metricsExpanded,
                 prevShowCommandInput, showCommandInput,
@@ -3848,9 +3960,9 @@ public class NodeConsolePanel extends JPanel {
                 writer.write(gson.toJson(settings));
             }
 
-            LOGGER.info("[GUI-Settings] Created default gui-settings.json for profile '{}'", profileName);
+            nodeContextLogger().info("[GUI-Settings] Created default gui-settings.json for profile '{}'", profileName);
         } catch (Exception e) {
-            LOGGER.warn("Failed to create default GUI settings for profile '{}'", profileName, e);
+            nodeContextLogger().warn("Failed to create default GUI settings for profile '{}'", profileName, e);
         }
     }
 
@@ -3860,7 +3972,7 @@ public class NodeConsolePanel extends JPanel {
      * Called by LifecycleListener.onShutdownRequested() during centralized shutdown.
      */
     public void saveGuiSettings() {
-        LOGGER.info("[GUI-Settings] ==== saveGuiSettings CALLED ===== profile={}, showMetricsPanel={}, metricsExpanded={}",
+        nodeContextLogger().info("[GUI-Settings] ==== saveGuiSettings CALLED ===== profile={}, showMetricsPanel={}, metricsExpanded={}",
                 profileName, showMetricsPanel, metricsExpanded);
         try {
             String settingsDir = resolveSettingsDir();
@@ -3894,9 +4006,9 @@ public class NodeConsolePanel extends JPanel {
                 Gson gson = new GsonBuilder().setPrettyPrinting().create();
                 writer.write(gson.toJson(settings));
             }
-            LOGGER.info("[GUI-Settings] Saved to gui-settings.json for profile '{}'", profileName);
+            nodeContextLogger().info("[GUI-Settings] Saved to gui-settings.json for profile '{}'", profileName);
         } catch (Exception e) {
-            LOGGER.error("Failed to save GUI settings for profile '{}'", profileName, e);
+            nodeContextLogger().error("Failed to save GUI settings for profile '{}'", profileName, e);
         }
     }
 
@@ -4103,12 +4215,12 @@ public class NodeConsolePanel extends JPanel {
          */
         private static void maybeScrollToEnd(JTextPane tp, JScrollPane pane) {
             if (pane == null) {
-                LOGGER.debug("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: pane=null, returning early");
+                staticLogger().debug("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: pane=null, returning early");
                 return;
             }
             javax.swing.JScrollBar verticalBar = pane.getVerticalScrollBar();
             if (verticalBar == null) {
-                LOGGER.debug("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: verticalBar=null, returning early");
+                staticLogger().debug("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: verticalBar=null, returning early");
                 return;
             }
             int max = verticalBar.getMaximum();
@@ -4117,19 +4229,19 @@ public class NodeConsolePanel extends JPanel {
             int scrollableRange = max - extent;
             
             double ratioForLog = scrollableRange > 0 ? (double) current / scrollableRange : Double.NaN;
-            LOGGER.debug("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: max={}, extent={}, current={}, scrollableRange={}, ratio={}, threshold={}", 
+            staticLogger().debug("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: max={}, extent={}, current={}, scrollableRange={}, ratio={}, threshold={}", 
                 max, extent, current, scrollableRange, ratioForLog, SMART_SCROLL_THRESHOLD);
             
             if (scrollableRange <= 0) {
-                LOGGER.debug("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: scrollableRange<=0, no scroll needed");
+                staticLogger().debug("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: scrollableRange<=0, no scroll needed");
                 return;
             }
             double positionRatio = (double) current / scrollableRange;
             if (positionRatio >= SMART_SCROLL_THRESHOLD) {
-                LOGGER.debug("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: WILL SCROLL - ratio={} >= threshold={}", positionRatio, SMART_SCROLL_THRESHOLD);
+                staticLogger().debug("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: WILL SCROLL - ratio={} >= threshold={}", positionRatio, SMART_SCROLL_THRESHOLD);
                 verticalBar.setValue(max);
             } else {
-                LOGGER.debug("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: NO SCROLL - ratio={} < threshold={} (user reading old logs)", positionRatio, SMART_SCROLL_THRESHOLD);
+                staticLogger().debug("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: NO SCROLL - ratio={} < threshold={} (user reading old logs)", positionRatio, SMART_SCROLL_THRESHOLD);
             }
         }
     }
@@ -4275,7 +4387,7 @@ public class NodeConsolePanel extends JPanel {
             profileLogger = ctx.getProfileLogger();
         }
         if (profileLogger == null) {
-            LOGGER.warn("ProfileLogger not available for profile '{}' — node not yet started, deferring", profileName);
+            nodeContextLogger().warn("ProfileLogger not available for profile '{}' — node not yet started, deferring", profileName);
             return;
         }
 
@@ -4288,7 +4400,7 @@ public class NodeConsolePanel extends JPanel {
                 consoleMaxLines = NodeLoggingContextApplier.resolveConsoleMaxLines(
                         ctx.getConfFolder(), profileName);
             } catch (Exception e) {
-                LOGGER.warn("Failed to resolve node console maxLines for '{}' — using default", profileName, e);
+                nodeContextLogger().warn("Failed to resolve node console maxLines for '{}' — using default", profileName, e);
             }
         }
         consoleSubscriber = new ProfileConsoleSubscriber(profileName, textPane.getStyledDocument(),
@@ -4406,27 +4518,27 @@ public class NodeConsolePanel extends JPanel {
             }
 
             // When node becomes READY/RUNNING, ensure MetricsPanel visibility matches user preference
-            if (newState == Signum.State.RUNNING || newState == Signum.State.RUNNING) {
-                LOGGER.info("[MetricsPanel] Node reached {} — applying visibility preference: showMetricsPanel={}", 
+            if (newState == Signum.State.RUNNING) {
+                nodeContextLogger().debug("[MetricsPanel] Node reached {} — applying visibility preference: showMetricsPanel={}",
                     newState, showMetricsPanel);
                 
                 if (showMetricsPanel) {
                     // Ensure the MetricsPanel is initialized and visible
                     if (metricsPanel == null || !metricsPanel.isVisible()) {
-                        LOGGER.info("[MetricsPanel] Initializing MetricsPanel for node state {}", newState);
+                        nodeContextLogger().info("[MetricsPanel] Initializing MetricsPanel for node state {}", newState);
                         updateMetricsPanelState(true);
                     } else {
-                        LOGGER.debug("[MetricsPanel] MetricsPanel already active, no action needed");
+                        nodeContextLogger().debug("[MetricsPanel] MetricsPanel already active, no action needed");
                     }
                 } else {
-                    LOGGER.debug("[MetricsPanel] User preference is to hide MetricsPanel, keeping hidden");
+                    nodeContextLogger().debug("[MetricsPanel] User preference is to hide MetricsPanel, keeping hidden");
                 }
 
                 // Sync checkbox state to ensure consistency — this is the authoritative source of truth
                 if (showMetricsItem != null) {
                     boolean current = showMetricsItem.isSelected();
                     if (current != showMetricsPanel) {
-                        LOGGER.warn("[MetricsPanel] Checkbox was inconsistent! Was={}, expected={} — fixing", 
+                        nodeContextLogger().warn("[MetricsPanel] Checkbox was inconsistent! Was={}, expected={} — fixing", 
                             current, showMetricsPanel);
                     }
                     showMetricsItem.setSelected(showMetricsPanel);
@@ -4435,7 +4547,7 @@ public class NodeConsolePanel extends JPanel {
 
             // When node stops, hide and shutdown MetricsPanel to release resources
             if (newState == Signum.State.STOPPED || newState == Signum.State.CREATED) {
-                LOGGER.debug("[MetricsPanel] Node stopped — shutting down MetricsPanel");
+                nodeContextLogger().debug("[MetricsPanel] Node stopped — shutting down MetricsPanel");
                 // Restart-safe: clear the attach latch so the NEXT start can re-attach
                 // the (re-created) ProfileLogger. Without this, the first attach is a
                 // permanent latch and all logs after a stop/start cycle are lost.

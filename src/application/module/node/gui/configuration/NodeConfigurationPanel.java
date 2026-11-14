@@ -1,4 +1,5 @@
 package application.module.node.gui.configuration;
+import com.formdev.flatlaf.FlatClientProperties;
 import application.utils.config.ModuleIds;
 
 import application.module.logging.LoggingAssignmentStore;
@@ -6,6 +7,7 @@ import application.module.node.NodeModule;
 import application.module.node.Signum;
 import application.module.node.crypto.Crypto;
 import application.module.node.gui.NodePanel;
+import application.module.node.gui.wizard.steps.DatabaseSelectionStep;
 import application.module.node.profile.EffectiveNodeProps;
 import application.module.node.profile.NodeProfile;
 import application.module.node.profile.NodeProfileRepository;
@@ -36,11 +38,12 @@ import application.utils.gui.HelpDialog;
 import application.utils.gui.NewProfileChoiceDialog;
 import application.utils.gui.FlatPlusButton;
 import application.utils.gui.FlatIconButton;
-import application.utils.gui.PlusGlyphIcon;
+import application.utils.gui.ProfileActionIcon;
 import application.utils.gui.ResponsiveToolbarScrollPane;
 import application.utils.gui.SearchMatchLabel;
 import application.utils.gui.SearchMatchPanel;
 import application.utils.gui.SearchValueHighlight;
+import application.utils.gui.IconFontCache;
 import application.utils.io.PathUtils;
 import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
@@ -71,18 +74,34 @@ import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 public class NodeConfigurationPanel extends JPanel {
 
     private NodeProfile savedProfile;
+    /** Values accepted by this editor session; distinct from the wizard's accepted-value baseline. */
+    private NodeProfile editorProfile;
     private NodeProfile appliedProfile;
-    private static final Logger LOGGER = LoggerFactory.getLogger(NodeConfigurationPanel.class);
+
+    /**
+     * F5 (node.gui hybrid routing, Q7/D7): this per-node view component logs on the
+     * owned node's isolated {@code NodeLoggers} (node context) once a {@link Signum} is
+     * attached; otherwise (late binding / headless) it falls back to the class-based
+     * (global) logger. The node-context &rarr; System Console forward path is unchanged.
+     */
+    private org.apache.logging.log4j.Logger nodeContextLogger() {
+        Signum s = this.signum;
+        if (s != null) {
+            return s.loggers().forClass(NodeConfigurationPanel.class);
+        }
+        return org.apache.logging.log4j.LogManager.getLogger(NodeConfigurationPanel.class);
+    }
+
     private final Map<String, Supplier<String>> valueSuppliers = new HashMap<>();
     private final Map<String, JComponent> propertyComponents = new HashMap<>();
+    private final Map<String, JTextArea> portValidationLabels = new HashMap<>();
+    private final Map<String, JButton> portRestoreButtons = new HashMap<>();
 
     /**
      * The editable, state-aware select menus of the value rows, keyed by the
@@ -156,7 +175,8 @@ public class NodeConfigurationPanel extends JPanel {
     static final Highlighter.HighlightPainter SEARCH_MATCH_PAINTER_ACTIVE =
             SearchValueHighlight.PAINTER_ACTIVE;
 
-    private final Map<String, String> helpTexts = new HashMap<>();
+    private static final Map<String, String> helpTexts = new HashMap<>();
+    private static volatile boolean helpTextsInitialized;
     private final Map<String, String> defaultValues = new HashMap<>();
     private final Runnable restartAction;
 
@@ -169,6 +189,7 @@ public class NodeConfigurationPanel extends JPanel {
     private JPanel autoDbRow;
 
     private String savedLinkedDb = "";
+    private String editorLinkedDb = "";
     /**
      * The database link the node runs (or will run) with — the applied
      * baseline of the link element in the JDBC row's tuple color coding.
@@ -178,6 +199,8 @@ public class NodeConfigurationPanel extends JPanel {
     private String appliedLinkedDb = "";
     private boolean savedDbAutoStart = false;
     private boolean savedDbAutoStop = false;
+    private boolean editorDbAutoStart = false;
+    private boolean editorDbAutoStop = false;
 
     private final Runnable backAction;
     private final Runnable switchAction;
@@ -264,6 +287,7 @@ public class NodeConfigurationPanel extends JPanel {
     private JButton deleteProfileBtn;
     private JButton copyProfileDataBtn;
     private JButton cloneProfileBtn;
+    private JButton resetToDefaultBtn;
     private JButton reloadProfileBtn;
     private String runningProfileName;
     private String loadedProfileName;
@@ -271,6 +295,40 @@ public class NodeConfigurationPanel extends JPanel {
     /** The category tab index of the Database tab (hosts the JDBC link row). */
     private int databaseTabIndex = -1;
     private boolean isProgrammaticChange = false;
+
+    /**
+     * Wizard mode: the panel was opened from the node setup wizard's advanced
+     * settings. The top profile toolbar row shows ONLY the Copy Configuration
+     * icon button (the same icon / styling / tooltip as the node console tab's
+     * toolbar — the wizard dialog's button row keeps Save / Cancel), the
+     * category tabs shrink to the dialog width instead of demanding a
+     * horizontal scrollbar (see {@link #createScrollPane}), the same 4-state
+     * value model and filter apply, and "applied" (green) is colored
+     * only against the stable original values passed to the constructor (the
+     * "applied" baseline); wizard values already accepted into the virtual
+     * profile are the "saved" baseline for this editor.
+     */
+    private boolean wizardMode = false;
+
+    /**
+     * Wizard mode: the maximum PREFERRED width of one category tab's content
+     * inside its scroll pane (see {@link #createScrollPane}). The advanced
+     * dialog's viewport is ~900px wide; capping the preferred width keeps the
+     * tabbed pane's preferred size inside it, so no horizontal scrollbar
+     * appears (the content's MINIMUM width — every element compressed — is
+     * well below the cap, so nothing is clipped).
+     */
+    private static final int WIZARD_TAB_MAX_PREF_WIDTH = 880;
+
+    /**
+     * The wizard's <b>virtual in-memory profile</b> (wizard mode only): the
+     * panel's data source and save target. Non-null means the profile FILE does
+     * not exist yet — the wizard's finish step creates it from this in-memory
+     * profile — so the editor performs no file I/O and no database-side
+     * persistence (assignment metadata, auto SQLite database profile): the
+     * finish step applies the same SSOT rules with the final values.
+     */
+    private NodeProfile virtualProfile = null;
 
     public NodeConfigurationPanel(Runnable restartAction, String confFolder, Runnable backAction,
             Runnable switchAction) {
@@ -294,8 +352,46 @@ public class NodeConfigurationPanel extends JPanel {
      */
     public NodeConfigurationPanel(Runnable restartAction, String confFolder, Runnable backAction,
             Runnable switchAction, String profileName) {
+        this(restartAction, confFolder, backAction, switchAction, profileName, null);
+    }
+
+    /**
+     * Creates a configuration panel for a specific node profile, optionally in
+     * "wizard mode" (opened from the node setup wizard's advanced settings).
+     * <p>
+     * Wizard mode here means the <b>virtual (in-memory) profile</b>: the panel
+     * loads from and saves to the given in-memory {@code NodeProfile} — the
+     * profile FILE does not exist yet (the wizard's finish step creates it).
+     * </p>
+     *
+     * @param virtualProfile the wizard's in-memory session profile (wizard mode),
+     *                       or {@code null} for normal (console) mode where the
+     *                       profile file on disk is loaded and saved
+     */
+    public NodeConfigurationPanel(Runnable restartAction, String confFolder, Runnable backAction,
+            Runnable switchAction, String profileName, NodeProfile virtualProfile) {
+        this(restartAction, confFolder, backAction, switchAction, profileName, virtualProfile, null);
+    }
+
+    /**
+     * The full wizard-mode constructor: the panel loads from and saves to the
+     * virtual (in-memory) {@code virtualProfile} (no file I/O — the profile
+     * file is created only by the wizard's finish step).
+     *
+     * @param virtualProfile      the wizard's in-memory session profile (non-null:
+     *                            this IS wizard mode)
+     * @param originalAppliedBaseline the original loaded values to use as the
+     *                                STABLE "applied" baseline of the 4-state
+     *                                coloring, or {@code null} to use the
+     *                                virtual profile's current (loaded) values
+     */
+    public NodeConfigurationPanel(Runnable restartAction, String confFolder, Runnable backAction,
+            Runnable switchAction, String profileName, NodeProfile virtualProfile,
+            Properties originalAppliedBaseline) {
         super(new BorderLayout());
-        LOGGER.debug("NodeConfigurationPanel constructor START");
+        nodeContextLogger().debug("NodeConfigurationPanel constructor START");
+        this.wizardMode = virtualProfile != null;
+        this.virtualProfile = virtualProfile;
         this.restartAction = restartAction;
         this.confFolder = confFolder;
         this.backAction = backAction;
@@ -310,15 +406,30 @@ public class NodeConfigurationPanel extends JPanel {
         this.runningProfileName = resolvedProfileName;
         this.loadedProfileName = this.runningProfileName;
 
-        // Use the unified profile loader to resolve the properties file path
+        // Use the unified profile loader to resolve the properties file path.
+        // VIRTUAL (wizard) mode: resolved but never created or read — the
+        // editor's data lives in the in-memory session profile until the
+        // wizard's finish persists the file.
         this.propertiesFile = ConfigurationUtils.resolveNodeProfilePath(this.loadedProfileName);
-        ConfigurationUtils.ensureConfigFileExists(this.propertiesFile);
 
         this.savedProfile = new NodeProfile(this.loadedProfileName);
-        try (FileInputStream in = new FileInputStream(propertiesFile.toFile())) {
-            this.savedProfile.getProperties().load(in);
-        } catch (Exception e) {
-            e.printStackTrace();
+        this.editorProfile = new NodeProfile(this.loadedProfileName);
+        if (virtualProfile != null) {
+            // VIRTUAL (in-memory) load: the wizard's session profile holds the
+            // accepted values so far (no file on disk to read). They are the
+            // editor's saved baseline; the stable original baseline remains
+            // separate and is used only for applied-state coloring.
+            Properties editorValues = copyProperties(virtualProfile.getProperties());
+            this.editorProfile.setProperties(copyProperties(editorValues));
+            this.savedProfile.setProperties(copyProperties(editorValues));
+        } else {
+            ConfigurationUtils.ensureConfigFileExists(this.propertiesFile);
+            try (FileInputStream in = new FileInputStream(propertiesFile.toFile())) {
+                this.savedProfile.getProperties().load(in);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            this.editorProfile.setProperties(copyProperties(this.savedProfile.getProperties()));
         }
 
         this.appliedProfile = new NodeProfile(this.loadedProfileName);
@@ -331,8 +442,14 @@ public class NodeConfigurationPanel extends JPanel {
         // PropertyService: its string form can drift from the file's form (and
         // it is empty until the node starts, falling back to the application
         // defaults), which used to color freshly loaded profile values "saved"
-        // instead of "applied".
-        this.appliedProfile.setProperties(copyProperties(this.savedProfile.getProperties()));
+        // instead of "applied". In wizard mode the "applied" baseline is the
+        // STABLE original values passed in (not the virtual profile re-read
+        // on each open). Wizard edits are compared to this stable baseline for
+        // color coding, while editorProfile separately tracks values accepted
+        // into the in-memory session profile.
+        this.appliedProfile.setProperties(copyProperties(
+                originalAppliedBaseline != null ? originalAppliedBaseline
+                        : this.savedProfile.getProperties()));
 
         this.renameProfileBtn = new JButton();
         this.deleteProfileBtn = new JButton();
@@ -352,33 +469,33 @@ public class NodeConfigurationPanel extends JPanel {
         this.applyBtn = new JButton();
         this.helpBtn = new JButton();
         
-        LOGGER.debug("NodeConfigurationPanel - calling loadAppliedProperties()");
+        nodeContextLogger().debug("NodeConfigurationPanel - calling loadAppliedProperties()");
         loadAppliedProperties();
         
-        LOGGER.debug("NodeConfigurationPanel - deferring initHelpTexts/initUI/loadProfileLinks to EDT (async)");
+        nodeContextLogger().debug("NodeConfigurationPanel - deferring initHelpTexts/initUI/loadProfileLinks to EDT (async)");
         
         // Defer heavy UI construction + profile link loading to EDT to avoid blocking the constructor.
         // initHelpTexts is ~1500 lines of HashMap.put calls, initUI builds 3000+ components,
         // and loadProfileLinks needs the JDBC link row built by initUI.
         SwingUtilities.invokeLater(() -> {
             try {
-                LOGGER.debug("NodeConfigurationPanel - async initHelpTexts START");
+                nodeContextLogger().debug("NodeConfigurationPanel - async initHelpTexts START");
                 initHelpTexts();
-                LOGGER.debug("NodeConfigurationPanel - async initHelpTexts DONE");
+                nodeContextLogger().debug("NodeConfigurationPanel - async initHelpTexts DONE");
                 
-                LOGGER.debug("NodeConfigurationPanel - async initUI START");
+                nodeContextLogger().debug("NodeConfigurationPanel - async initUI START");
                 initUI();
-                LOGGER.debug("NodeConfigurationPanel - async initUI DONE");
+                nodeContextLogger().debug("NodeConfigurationPanel - async initUI DONE");
                 
-                LOGGER.debug("NodeConfigurationPanel - async loadProfileLinks START for: {}", loadedProfileName);
+                nodeContextLogger().debug("NodeConfigurationPanel - async loadProfileLinks START for: {}", loadedProfileName);
                 loadProfileLinks(loadedProfileName);
-                LOGGER.debug("NodeConfigurationPanel - async loadProfileLinks DONE");
+                nodeContextLogger().debug("NodeConfigurationPanel - async loadProfileLinks DONE");
             } catch (Exception e) {
-                LOGGER.error("NodeConfigurationPanel - async init FAILED", e);
+                nodeContextLogger().error("NodeConfigurationPanel - async init FAILED", e);
             }
         });
         
-        LOGGER.debug("NodeConfigurationPanel constructor returned (UI will be built asynchronously)");
+        nodeContextLogger().debug("NodeConfigurationPanel constructor returned (UI will be built asynchronously)");
     }
 
     /**
@@ -390,7 +507,7 @@ public class NodeConfigurationPanel extends JPanel {
         try {
             action.run();
         } catch (Exception ex) {
-            LOGGER.error("{} failed for profile '{}'", actionName, loadedProfileName, ex);
+            nodeContextLogger().error("{} failed for profile '{}'", actionName, loadedProfileName, ex);
             JOptionPane.showMessageDialog(this, actionName + " failed: " + ex.getMessage(),
                     "Error", JOptionPane.ERROR_MESSAGE);
         }
@@ -404,11 +521,18 @@ public class NodeConfigurationPanel extends JPanel {
         //     and the node profile toolbar) ---
         JPanel profilePanel = ConfigurationUtils.createProfileToolbarRow();
 
+        // Wizard mode (the setup wizard's advanced dialog): the top toolbar
+        // row carries ONLY the Copy Configuration icon button — the same icon,
+        // styling and tooltip as the node console tab's toolbar row. The other
+        // profile actions do not apply while the node is still being created
+        // (the dialog's button row keeps Save / Cancel).
         newProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip(
                 "New Profile<br><br>Creates a new, independent node profile. "
                         + "Choose the setup wizard or start with an empty profile."));
         newProfileBtn.addActionListener(e -> runProfileAction("New Profile", this::newProfile));
-        profilePanel.add(newProfileBtn);
+        if (!wizardMode) {
+            profilePanel.add(newProfileBtn);
+        }
 
         cloneProfileBtn = new JButton();
         cloneProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip(
@@ -416,7 +540,9 @@ public class NodeConfigurationPanel extends JPanel {
                         + "current configuration, including unsaved changes. The existing profile is not changed, "
                         + "and the new profile is not started."));
         cloneProfileBtn.addActionListener(e -> runProfileAction("Clone Configuration", this::cloneProfile));
-        profilePanel.add(cloneProfileBtn);
+        if (!wizardMode) {
+            profilePanel.add(cloneProfileBtn);
+        }
 
         copyProfileDataBtn = new JButton();
         copyProfileDataBtn.setToolTipText(ConfigurationUtils.profileTooltip(
@@ -425,7 +551,17 @@ public class NodeConfigurationPanel extends JPanel {
                         + "unsaved changes are discarded after confirmation. Use Save to write the copied "
                         + "configuration to this profile."));
         copyProfileDataBtn.addActionListener(e -> runProfileAction("Copy Configuration", this::copyProfileData));
+        // Copy stays in the row in wizard mode too: the wizard dialog's former
+        // "Copy Configuration" text button was replaced by this very icon, in
+        // the dialog's top row (the console tab's toolbar counterpart).
         profilePanel.add(copyProfileDataBtn);
+
+        resetToDefaultBtn = new JButton();
+        resetToDefaultBtn.setToolTipText(ConfigurationUtils.profileTooltip(
+                "Reset to Default<br><br>Copies the hardcoded application default values "
+                        + "into the current editor (unsaved). Press Save to persist."));
+        resetToDefaultBtn.addActionListener(e -> resetToDefaults());
+        profilePanel.add(resetToDefaultBtn);
 
         renameProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip(
                 "Rename Profile<br><br>Renames this node profile and its data paths. If the node is "
@@ -433,7 +569,9 @@ public class NodeConfigurationPanel extends JPanel {
                         + "(running, paused, or stopped)."));
         renameProfileBtn.addActionListener(e -> runProfileAction("Rename Profile",
                 () -> renameProfile(loadedProfileName)));
-        profilePanel.add(renameProfileBtn);
+        if (!wizardMode) {
+            profilePanel.add(renameProfileBtn);
+        }
 
         saveBtn.setToolTipText(ConfigurationUtils.profileTooltip(
                 "Save<br><br>Saves all unsaved changes to the current profile<br>"
@@ -441,7 +579,9 @@ public class NodeConfigurationPanel extends JPanel {
                         + "Active only while there are unsaved changes."));
         saveBtn.setEnabled(false);
         saveBtn.addActionListener(e -> runProfileAction("Save", this::saveProfile));
-        profilePanel.add(saveBtn);
+        if (!wizardMode) {
+            profilePanel.add(saveBtn);
+        }
 
         applyBtn.setToolTipText(ConfigurationUtils.profileTooltip(
                 "Apply<br><br>Applies the saved changes, marks the profile as applied<br>"
@@ -449,14 +589,18 @@ public class NodeConfigurationPanel extends JPanel {
                         + "Active only while there are saved, not yet applied changes."));
         applyBtn.setEnabled(false);
         applyBtn.addActionListener(e -> runProfileAction("Apply", this::applyProfile));
-        profilePanel.add(applyBtn);
+        if (!wizardMode) {
+            profilePanel.add(applyBtn);
+        }
 
         reloadProfileBtn = new JButton();
         reloadProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip(
                 "Reload Configuration<br><br>Re-reads the current profile file from disk (e.g. after external edits).<br>"
                         + "Unsaved changes in the editor are discarded."));
         reloadProfileBtn.addActionListener(e -> runProfileAction("Reload Configuration", this::reloadProfile));
-        profilePanel.add(reloadProfileBtn);
+        if (!wizardMode) {
+            profilePanel.add(reloadProfileBtn);
+        }
 
         deleteProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip(
                 "Delete Profile<br><br>Permanently deletes this profile, its settings<br>"
@@ -464,7 +608,9 @@ public class NodeConfigurationPanel extends JPanel {
                         + "If the node is running it will be stopped (and not restarted)."));
         deleteProfileBtn.addActionListener(e -> runProfileAction("Delete Profile",
                 () -> deleteProfile(loadedProfileName)));
-        profilePanel.add(deleteProfileBtn);
+        if (!wizardMode) {
+            profilePanel.add(deleteProfileBtn);
+        }
 
         updateProfileButtonsUI();
 
@@ -472,7 +618,9 @@ public class NodeConfigurationPanel extends JPanel {
                 + "configuration value states, and the actions available in this toolbar."));
         helpBtn.addActionListener(e -> HelpDialog.show(this, "Node Configuration Profiles",
                 buildConfigurationHelpContent()));
-        profilePanel.add(helpBtn);
+        if (!wizardMode) {
+            profilePanel.add(helpBtn);
+        }
 
         // The standard responsive toolbar wrapper (shared insets/policies —
         // identical margins to the logging profile panels' toolbar).
@@ -508,23 +656,36 @@ public class NodeConfigurationPanel extends JPanel {
         // already says what is being filtered, so the boxes save the space.
         showUnsavedBox = statusPanel.addCheckbox("Unsaved", GuiColors.getUnsaved(), true);
         showUnsavedBox.setToolTipText(
-                "Show / hide the values that match neither the saved profile file nor the running node. "
-                        + "Combined with the search text when it is not empty.");
+                wizardMode
+                        ? "Show / hide the values that match neither the accepted virtual profile nor the "
+                                + "original profile baseline."
+                        : "Show / hide the values that match neither the saved profile file nor the running "
+                                + "node. Combined with the search text when it is not empty.");
 
         showUnsavedAppliedBox = statusPanel.addCheckbox("Unsaved Applied",
                 GuiColors.getUnsavedApplied(), true);
         showUnsavedAppliedBox.setToolTipText(
-                "Show / hide the values that differ from the saved profile file but match exactly what "
-                        + "the running node is using.");
+                wizardMode
+                        ? "Show / hide the values that differ from the accepted virtual profile but match "
+                                + "the original profile baseline."
+                        : "Show / hide the values that differ from the saved profile file but match exactly "
+                                + "what the running node is using.");
 
         showSavedBox = statusPanel.addCheckbox("Saved", GuiColors.getSaved(), true);
         showSavedBox.setToolTipText(
-                "Show / hide the values that are saved in the profile file but differ from the running node.");
+                wizardMode
+                        ? "Show / hide the values accepted in the virtual profile but different from the "
+                                + "original profile baseline."
+                        : "Show / hide the values that are saved in the profile file but differ from the "
+                                + "running node.");
 
         showAppliedBox = statusPanel.addCheckbox("Saved Applied", GuiColors.getApplied(), true);
         showAppliedBox.setToolTipText(
-                "Show / hide the values that are saved in the profile file AND match exactly what the "
-                        + "running node is using.");
+                wizardMode
+                        ? "Show / hide the values accepted in the virtual profile that also match the "
+                                + "original profile baseline."
+                        : "Show / hide the values that are saved in the profile file AND match exactly what "
+                                + "the running node is using.");
 
         JButton colorHelpBtn = new HelpButton();
         colorHelpBtn.setToolTipText("Detailed Color Legend");
@@ -568,6 +729,8 @@ public class NodeConfigurationPanel extends JPanel {
         // vertical positions in both tabs. (A NORTH/SOUTH pair in a plain
         // BorderLayout would sit flush — no gap — and be 5px off.)
         JPanel northPanel = new JPanel(new BorderLayout(0, 5));
+        // Both modes show the standard profile toolbar row on top — in wizard
+        // mode it carries only the Copy Configuration icon (see above).
         northPanel.add(profileScrollPane, BorderLayout.NORTH);
         northPanel.add(searchRow, BorderLayout.CENTER);
         bodyPanel.add(northPanel, BorderLayout.NORTH);
@@ -581,10 +744,10 @@ public class NodeConfigurationPanel extends JPanel {
         searchViewActive = false;
         lastListedMatches = null;
 
-        LOGGER.debug("initUI - START");
+        nodeContextLogger().debug("initUI - START");
         
         // --- API Server Settings ---
-        LOGGER.debug("initUI - Building API tab");
+        nodeContextLogger().debug("initUI - Building API tab");
         currentAddingTabIndex = 0;
         JPanel apiPanel = createCategoryPanel();
         addProperty(apiPanel, Props.API_SERVER, "Enable API Server");
@@ -607,10 +770,10 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(apiPanel, Props.API_SSL_LETSENCRYPT_PATH, "SSL LetsEncrypt Path");
         finalizeCategoryPanel(apiPanel);
         categoryTabbedPane.addTab("API Settings", createScrollPane(apiPanel));
-        LOGGER.debug("initUI - API tab done");
+        nodeContextLogger().debug("initUI - API tab done");
 
         // --- Database Settings ---
-        LOGGER.debug("initUI - Building Database tab");
+        nodeContextLogger().debug("initUI - Building Database tab");
         currentAddingTabIndex = 1;
         databaseTabIndex = currentAddingTabIndex;
         // Tighter row gap than the other tabs: the database entries should
@@ -634,10 +797,10 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(dbPanel, Props.NODE_BLOCK_CACHE_MB, "Block Cache (MB)");
         finalizeCategoryPanel(dbPanel);
         categoryTabbedPane.addTab("Database", createScrollPane(dbPanel));
-        LOGGER.debug("initUI - Database tab done");
+        nodeContextLogger().debug("initUI - Database tab done");
 
         // --- P2P Networking ---
-        LOGGER.debug("initUI - Building P2P tab");
+        nodeContextLogger().debug("initUI - Building P2P tab");
         currentAddingTabIndex = 2;
         JPanel p2pPanel = createCategoryPanel();
         addProperty(p2pPanel, Props.P2P_PORT, "P2P Port");
@@ -669,10 +832,10 @@ public class NodeConfigurationPanel extends JPanel {
                 "Max Unconfirmed Txs Raw Size Bytes");
         finalizeCategoryPanel(p2pPanel);
         categoryTabbedPane.addTab("P2P Networking", createScrollPane(p2pPanel));
-        LOGGER.debug("initUI - P2P tab done");
+        nodeContextLogger().debug("initUI - P2P tab done");
 
         // --- Mining & GPU ---
-        LOGGER.debug("initUI - Building Mining tab");
+        nodeContextLogger().debug("initUI - Building Mining tab");
         currentAddingTabIndex = 3;
         JPanel miningPanel = createCategoryPanel();
         addProperty(miningPanel, Props.GPU_ACCELERATION, "Enable GPU Acceleration");
@@ -688,10 +851,10 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(miningPanel, Props.ALLOW_OTHER_SOLO_MINERS, "Allow Other Solo Miners");
         finalizeCategoryPanel(miningPanel);
         categoryTabbedPane.addTab("Mining & GPU", createScrollPane(miningPanel));
-        LOGGER.debug("initUI - Mining tab done");
+        nodeContextLogger().debug("initUI - Mining tab done");
 
         // --- System & Advanced ---
-        LOGGER.debug("initUI - Building System tab");
+        nodeContextLogger().debug("initUI - Building System tab");
         currentAddingTabIndex = 4;
         JPanel systemPanel = createCategoryPanel();
         addProperty(systemPanel, Props.APPLICATION, "Application Name");
@@ -705,11 +868,8 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(systemPanel, Props.MEASUREMENT_ACTIVE, "Enable Metrics/Measurement");
         addProperty(systemPanel, Props.MEASUREMENT_DIR, "Measurement Dir");
         addProperty(systemPanel, Props.SETTINGS_DIR, "Settings Dir");
-        addProperty(systemPanel, Props.FILE_LOG_ENABLE, "Per-Node File Log Enabled");
-        addProperty(systemPanel, Props.FILE_LOG_LEVEL, "Per-Node File Log Level");
-        addProperty(systemPanel, Props.FILE_LOG_DIR, "Per-Node File Log Dir");
-        addProperty(systemPanel, Props.FILE_LOG_LIMIT, "Per-Node File Log Size Limit (bytes)");
-        addProperty(systemPanel, Props.FILE_LOG_COUNT, "Per-Node File Log Rotations");
+        // Per-node file log (node.fileLog.*) is configured in the Logging GUI (F4.4 SSOT);
+        // the legacy Per-Node File Log fields here (bus-level ProfileFileAppender) are removed.
         addProperty(systemPanel, Props.ICON_LOCATION, "Icon Location");
         addProperty(systemPanel, Props.AUTO_POP_OFF_ENABLED, "Enable Auto Pop-Off");
         addProperty(systemPanel, Props.INITIAL_POP_OFF_ENABLED, "Enable Initial Safety Pop-Off");
@@ -727,10 +887,10 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(systemPanel, Props.ALIAS_RENEWAL_FREQUENCY, "Alias Renewal Frequency");
         finalizeCategoryPanel(systemPanel);
         categoryTabbedPane.addTab("System & Advanced", createScrollPane(systemPanel));
-        LOGGER.debug("initUI - System tab done");
+        nodeContextLogger().debug("initUI - System tab done");
 
         // --- Dev & Debug ---
-        LOGGER.debug("initUI - Building Dev tab");
+        nodeContextLogger().debug("initUI - Building Dev tab");
         currentAddingTabIndex = 5;
         JPanel devPanel = createCategoryPanel();
         addProperty(devPanel, Props.DEV_OFFLINE, "Offline Mode");
@@ -748,10 +908,10 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(devPanel, Props.NODE_COMMUNICATION_LOGGING_MASK, "Communication Logging Mask");
         finalizeCategoryPanel(devPanel);
         categoryTabbedPane.addTab("Dev & Debug", createScrollPane(devPanel));
-        LOGGER.debug("initUI - Dev tab done");
+        nodeContextLogger().debug("initUI - Dev tab done");
 
         // --- Jetty Server ---
-        LOGGER.debug("initUI - Building Jetty tab");
+        nodeContextLogger().debug("initUI - Building Jetty tab");
         currentAddingTabIndex = 6;
         JPanel jettyPanel = createCategoryPanel();
         addProperty(jettyPanel, Props.JETTY_API_GZIP_FILTER, "API Gzip Filter");
@@ -787,10 +947,10 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(jettyPanel, Props.JETTY_P2P_DOS_FILTER_MANAGED_ATTR, "P2P DoS Managed Attr");
         finalizeCategoryPanel(jettyPanel);
         categoryTabbedPane.addTab("Jetty Server", createScrollPane(jettyPanel));
-        LOGGER.debug("initUI - Jetty tab done");
+        nodeContextLogger().debug("initUI - Jetty tab done");
 
         // --- Network Constants ---
-        LOGGER.debug("initUI - Building Network tab");
+        nodeContextLogger().debug("initUI - Building Network tab");
         currentAddingTabIndex = 7;
         JPanel netPanel = createCategoryPanel();
         addProperty(netPanel, Props.BLOCK_TIME, "Block Time");
@@ -832,7 +992,7 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(netPanel, Props.DEV_NEXT_FORK_BLOCK_HEIGHT, "Dev Next Fork Start");
         finalizeCategoryPanel(netPanel);
         categoryTabbedPane.addTab("Network Constants", createScrollPane(netPanel));
-        LOGGER.debug("initUI - Network tab done");
+        nodeContextLogger().debug("initUI - Network tab done");
 
         // --- Linked Profiles: NO separate tab. The "Linked Database Profile"
         //     control (checkbox + profile card + auto start/stop boxes) of the
@@ -840,7 +1000,7 @@ public class NodeConfigurationPanel extends JPanel {
         //     the logging assignment is managed on the Logging tab (SSOT).
 
         // --- Content: the category tabs (search highlights matches in place) ---
-        LOGGER.debug("initUI - Adding category tabs");
+        nodeContextLogger().debug("initUI - Adding category tabs");
         // --- Content Container (CardLayout: tabbed settings vs flat search
         //     results). While a search is active the tabbed pane is hidden and
         //     the matching rows (from every tab) are listed flat; clearing the
@@ -848,7 +1008,7 @@ public class NodeConfigurationPanel extends JPanel {
         contentCardLayout = new CardLayout();
         contentContainer = new JPanel(contentCardLayout);
         contentContainer.add(categoryTabbedPane, "TABS");
-        searchResultsPanel = new JPanel(new MigLayout("fillx, insets 10, gap 5", "[][grow]", ""));
+        searchResultsPanel = createCategoryPanel(5);
         contentContainer.add(createScrollPane(searchResultsPanel), "SEARCH");
         bodyPanel.add(contentContainer, BorderLayout.CENTER);
 
@@ -874,7 +1034,7 @@ public class NodeConfigurationPanel extends JPanel {
         add(bodyPanel, BorderLayout.CENTER);
         add(bottomContainer, BorderLayout.SOUTH);
         
-        LOGGER.debug("initUI - COMPLETED ({} tabs)", categoryTabbedPane.getTabCount());
+        nodeContextLogger().debug("initUI - COMPLETED ({} tabs)", categoryTabbedPane.getTabCount());
     }
 
     @Override
@@ -978,13 +1138,13 @@ public class NodeConfigurationPanel extends JPanel {
 
     private void updateProfileButtonsUI() {
         ConfigurationUtils.configureProfileToolbar(newProfileBtn, saveBtn, applyBtn, renameProfileBtn,
-                deleteProfileBtn, reloadProfileBtn, null, null,
+                deleteProfileBtn, reloadProfileBtn, null, resetToDefaultBtn,
                 copyProfileDataBtn, cloneProfileBtn);
         float iconSize = GuiConstants.getToolBarIconSize();
-        // Reload carries the refresh glyph's swapped counterpart (see
-        // ConfigurationUtils#configureProfileToolbar): it is node-config's
-        // "refresh" action, so it moves to the same UNDO glyph as the other panels.
-        ConfigurationUtils.styleProfileIconButton(reloadProfileBtn, FontAwesome.UNDO,
+        // Reload is node-config's "refresh" action (re-read from disk), so it
+        // carries the REFRESH glyph — the same icon the other panels' refresh
+        // buttons use.
+        ConfigurationUtils.styleProfileIconButton(reloadProfileBtn, FontAwesome.REFRESH,
                 GuiColors.getButtonIcon(), iconSize);
         // Save / Apply are tinted with their value-state colors (the "saved"
         // and "applied" palette colors) so they read as the two halves of the
@@ -1000,6 +1160,14 @@ public class NodeConfigurationPanel extends JPanel {
     private void refreshUIColors() {
         for (Map.Entry<String, JComponent> entry : propertyComponents.entrySet()) {
             updateColor(entry.getValue(), entry.getKey(), defaultValues.get(entry.getKey()));
+            Prop<?> prop = allPropertyRows.stream()
+                    .filter(row -> row.prop != null && entry.getKey().equals(row.prop.getName()))
+                    .map(row -> row.prop)
+                    .findFirst()
+                    .orElse(null);
+            if (prop != null && isValidatedPort(prop)) {
+                updatePortValidation(prop);
+            }
         }
     }
 
@@ -1073,6 +1241,9 @@ public class NodeConfigurationPanel extends JPanel {
                 if (row.help != null) {
                     searchResultsPanel.add(row.help, row.helpConstraints);
                 }
+                if (row.validation != null) {
+                    searchResultsPanel.add(row.validation, row.validationConstraints);
+                }
                 searchResultsPanel.add(row.separator, row.separatorConstraints);
             }
             contentCardLayout.show(contentContainer, "SEARCH");
@@ -1135,10 +1306,10 @@ public class NodeConfigurationPanel extends JPanel {
      */
     private void restoreRow(PropertyRow row) {
         JPanel parent = row.originalParent;
-        Component[] parts = { row.label, row.input, row.extra, row.help, row.separator };
+        Component[] parts = { row.label, row.input, row.extra, row.help, row.validation, row.separator };
         Object[] constraints = { row.labelConstraints, row.inputConstraints, row.extraConstraints,
-                row.helpConstraints, row.separatorConstraints };
-        int[] indices = { row.labelIndex, row.inputIndex, row.extraIndex, row.helpIndex,
+                row.helpConstraints, row.validationConstraints, row.separatorConstraints };
+        int[] indices = { row.labelIndex, row.inputIndex, row.extraIndex, row.helpIndex, row.validationIndex,
                 row.separatorIndex };
         // Insertion-sort the (part, constraint, index) triples by saved index;
         // null parts sort to the end.
@@ -1206,6 +1377,9 @@ public class NodeConfigurationPanel extends JPanel {
         }
         if (row.help != null) {
             row.helpIndex = row.originalParent.getComponentZOrder(row.help);
+        }
+        if (row.validation != null) {
+            row.validationIndex = row.originalParent.getComponentZOrder(row.validation);
         }
         row.separatorIndex = row.originalParent.getComponentZOrder(row.separator);
         JTextComponent value = rowValueTextComponent(row);
@@ -1487,7 +1661,7 @@ public class NodeConfigurationPanel extends JPanel {
             // Only an EDITABLE combo actually shows its editor text field; a
             // non-editable one renders its selection without it, so there is
             // no visible text to match or highlight there.
-            if (comboBox.isEditable()
+            if (comboBox.isEditable() && comboBox.getEditor() != null
                     && comboBox.getEditor().getEditorComponent() instanceof JTextComponent textComponent) {
                 return textComponent;
             }
@@ -1587,6 +1761,61 @@ public class NodeConfigurationPanel extends JPanel {
         return loadedProfileName;
     }
 
+    // ── Setup-wizard integration API ─────────────────────────────────────────
+    // The wizard's node-configuration step opens this panel in a modal dialog
+    // (the Copy Configuration icon on the editor's top toolbar row + a
+    // Save / Cancel button row at the bottom). These methods expose the
+    // toolbar actions the dialog drives (same semantics as the node console
+    // toolbar). The wizard's port fields stay in sync through the virtual
+    // (in-memory) session profile — the editor's authoritative source:
+    // wizard → virtual profile → editor on open, virtual profile → wizard on
+    // close.
+
+    /**
+     * Copy-configuration action (the same one as the node console toolbar):
+     * discovers the existing profiles and copies the selected one's
+     * configuration into THIS profile's editor (the editor keeps belonging to
+     * the current profile; the copied values show up as unsaved changes).
+     */
+    public void copyProfileDataAction() {
+        runProfileAction("Copy Configuration", this::copyProfileData);
+    }
+
+    /**
+     * Save-or-discard flow for the wizard's advanced dialog: with no unsaved
+     * changes {@code onDone} runs immediately; otherwise the panel's own
+     * Save / Discard / Cancel dialog decides (SAVE or DISCARD run
+     * {@code onDone} and return {@code true}; CANCEL keeps the editor open and
+     * returns {@code false}).
+     */
+    public boolean saveOrDiscardThen(Runnable onDone) {
+        String report = getUnsavedChangesReport();
+        if (report == null) {
+            if (onDone != null) {
+                onDone.run();
+            }
+            return true;
+        }
+        ProfileSaveApplyDialog.Result result = ProfileSaveApplyDialog.show(this, loadedProfileName, report);
+        if (result == ProfileSaveApplyDialog.Result.DISCARD) {
+            reloadFromDisk();
+            if (onDone != null) {
+                onDone.run();
+            }
+            return true;
+        }
+        if (result != ProfileSaveApplyDialog.Result.SAVE) {
+            return false;
+        }
+        if (doSaveCurrentProfile()) {
+            if (onDone != null) {
+                onDone.run();
+            }
+            return true;
+        }
+        return false;
+    }
+
     /**
      * Loads the per-profile database assignment and the DB auto start/stop
      * flags, in the storage model:
@@ -1610,8 +1839,8 @@ public class NodeConfigurationPanel extends JPanel {
     private void loadProfileLinks(String profileName) {
         isProgrammaticChange = true;
         try {
-            String savedUrl = savedProfile.getProperty(Props.DB_URL.getName(), getSafeDefault(Props.DB_URL));
-            boolean sqliteUrl = savedUrl != null && savedUrl.toLowerCase(Locale.ROOT).startsWith("jdbc:sqlite:");
+            String currentUrl = editorProfile.getProperty(Props.DB_URL.getName(), getSafeDefault(Props.DB_URL));
+            boolean sqliteUrl = currentUrl != null && currentUrl.toLowerCase(Locale.ROOT).startsWith("jdbc:sqlite:");
 
             ProfileConfig profileConfig = new ProfileConfig();
             String dbLink = profileConfig.getDatabaseProfileLink(profileName);
@@ -1632,14 +1861,14 @@ public class NodeConfigurationPanel extends JPanel {
                 // JdbcConfigurationPanel#loadInitial. Server engines pass the
                 // recorded assignment; for a SQLite URL the link is derived
                 // from the properties inside the panel, so nothing is passed.
-                jdbc.loadInitial(sqliteUrl ? null : dbLink, savedUrl,
-                        savedProfile.getProperty(Props.DB_USERNAME.getName(), getSafeDefault(Props.DB_USERNAME)),
-                        savedProfile.getProperty(Props.DB_PASSWORD.getName(), getSafeDefault(Props.DB_PASSWORD)));
+                jdbc.loadInitial(sqliteUrl ? null : dbLink, currentUrl,
+                        editorProfile.getProperty(Props.DB_USERNAME.getName(), getSafeDefault(Props.DB_USERNAME)),
+                        editorProfile.getProperty(Props.DB_PASSWORD.getName(), getSafeDefault(Props.DB_PASSWORD)));
                 JComponent wrapper = propertyComponents.get(Props.DB_URL.getName());
                 if (wrapper != null) {
-                    JCheckBox cb = (JCheckBox) wrapper.getClientProperty("useProfileCheck");
-                    if (cb != null) {
-                        cb.setSelected(jdbc.isLinkedMode());
+                    LinkedDbModeSelector modeSelector = (LinkedDbModeSelector) wrapper.getClientProperty("useProfileCheck");
+                    if (modeSelector != null) {
+                        modeSelector.setLinkedMode(jdbc.isLinkedMode());
                     }
                 }
             }
@@ -1648,13 +1877,17 @@ public class NodeConfigurationPanel extends JPanel {
         }
 
         updateAutoDbCheckboxesState();
-        savedLinkedDb = getLinkedDbProfile();
+        savedLinkedDb = databaseLinkOf(
+                savedProfile.getProperty(Props.DB_URL.getName(), getSafeDefault(Props.DB_URL)), profileName);
+        editorLinkedDb = getLinkedDbProfile();
         // The applied baseline of the link element: the link of the profile
         // the node actually runs with (derived for SQLite, recorded for
         // server engines) — not the loaded profile's effective link.
         appliedLinkedDb = databaseLinkOfAppliedProfile();
         savedDbAutoStart = autoStartDbCheck != null && autoStartDbCheck.isSelected();
         savedDbAutoStop = autoStopDbCheck != null && autoStopDbCheck.isSelected();
+        editorDbAutoStart = savedDbAutoStart;
+        editorDbAutoStop = savedDbAutoStop;
         refreshUIColors();
     }
 
@@ -1687,7 +1920,7 @@ public class NodeConfigurationPanel extends JPanel {
     private String databaseLinkOf(String url, String profileName) {
         if (url != null && url.toLowerCase(Locale.ROOT).startsWith("jdbc:sqlite:")) {
             SqliteDatabasePaths.SqliteUrlParts parts = SqliteDatabasePaths.splitUrl(url);
-            if (parts != null) {
+            if (parts != null && SqliteDatabasePaths.isDbFile(parts.fileName())) {
                 String derived = SqliteDatabasePaths.deriveProfileName(parts.dir());
                 if (derived != null && Files.isDirectory(SqliteDatabasePaths.profileDir(derived))) {
                     return "SQLite:" + derived;
@@ -1701,8 +1934,8 @@ public class NodeConfigurationPanel extends JPanel {
 
     /**
      * The host-side half of a link change (the panel's
-     * {@link JdbcConfigurationPanel.LinkChangeListener}): keeps the "Linked
-     * Database Profile" checkbox in sync with the panel's mode (the panel may
+     * {@link JdbcConfigurationPanel.LinkChangeListener}): keeps the database-URL
+     * source selector in sync with the panel's mode (the panel may
      * auto-unlink itself, e.g. an unmaterializable link at load) and persists the
      * effective link into profiles.json — unless the change is
      * programmatic (the initial load pass persists nothing).
@@ -1710,11 +1943,11 @@ public class NodeConfigurationPanel extends JPanel {
     private void onJdbcLinkChanged(JdbcConfigurationPanel panel, JdbcConfigurationPanel.JdbcState state) {
         JComponent wrapper = propertyComponents.get(Props.DB_URL.getName());
         if (wrapper != null) {
-            JCheckBox cb = (JCheckBox) wrapper.getClientProperty("useProfileCheck");
-            if (cb != null && cb.isSelected() != panel.isLinkedMode()) {
+            LinkedDbModeSelector modeSelector = (LinkedDbModeSelector) wrapper.getClientProperty("useProfileCheck");
+            if (modeSelector != null && modeSelector.isLinkedMode() != panel.isLinkedMode()) {
                 isProgrammaticChange = true;
                 try {
-                    cb.setSelected(panel.isLinkedMode());
+                    modeSelector.setLinkedMode(panel.isLinkedMode());
                 } finally {
                     isProgrammaticChange = false;
                 }
@@ -1724,6 +1957,50 @@ public class NodeConfigurationPanel extends JPanel {
             saveDatabaseAssignment(loadedProfileName);
         }
         updateAutoDbCheckboxesState();
+    }
+
+    /**
+     * The DB.Url row's discreet "+": creates a new database profile for the
+     * engine the editor currently shows (SSOT mapping:
+     * {@link DatabaseSelectionStep#defaultProfileWizardLauncher} — the same
+     * engine → profile-wizard mapping the install wizard uses) prefilled with
+     * this node profile's name (the same SSOT the auto-link uses: the node
+     * profile name as the database profile name), then selects the created
+     * profile and links it — the ONLY way a new database profile is created
+     * from the DB.Url row (the editor's profile select is a plain,
+     * non-editable dropdown over existing profiles). A cancelled wizard
+     * changes nothing.
+     */
+    private void onCreateDbProfileClick(JdbcConfigurationPanel jdbc) {
+        DatabaseConfigurationPanel.DatabaseEngine engine = jdbc.getEngine();
+        if (engine == null) {
+            return;
+        }
+        String suggested = loadedProfileName != null && !loadedProfileName.isBlank()
+                ? loadedProfileName.trim()
+                : ProfileNameSuggester.baseName(false, null, false, 0);
+        String created;
+        try {
+            created = DatabaseSelectionStep.defaultProfileWizardLauncher(engine, suggested);
+        } catch (RuntimeException e) {
+            nodeContextLogger().warn("The database profile wizard failed", e);
+            return;
+        }
+        if (created == null || created.trim().isEmpty()) {
+            return; // cancelled
+        }
+        // Re-discover the profiles (the new one exists on disk now), select the
+        // created profile, then enable the link mode (the link-change callback
+        // persists the assignment and syncs the "Linked Database Profile" box).
+        jdbc.refreshProfiles();
+        JComponent combo = jdbc.getProfileComboComponent();
+        if (combo instanceof JComboBox<?> select) {
+            select.setSelectedItem(created.trim());
+        }
+        jdbc.requestLinkMode(true);
+        updateAutoDbCheckboxesState();
+        updateDirtyStatus();
+        refreshUIColors();
     }
 
     /**
@@ -1744,6 +2021,9 @@ public class NodeConfigurationPanel extends JPanel {
      * save, and on apply only.
      */
     private void saveDatabaseAssignment(String profileName) {
+        if (virtualProfile != null) {
+            return;
+        }
         JdbcConfigurationPanel jdbc = jdbcPanel();
         boolean sqlite = jdbc == null || jdbc.getEngine() == DatabaseConfigurationPanel.DatabaseEngine.SQLITE;
         boolean autoStart = autoStartDbCheck != null && autoStartDbCheck.isSelected();
@@ -1785,7 +2065,7 @@ public class NodeConfigurationPanel extends JPanel {
             if (p == null || p.isLinkedMode())
                 return;
             SqliteDatabasePaths.SqliteUrlParts parts = SqliteDatabasePaths.splitUrl(dbUrl);
-            if (parts == null || parts.fileName().isEmpty())
+            if (parts == null || !SqliteDatabasePaths.isDbFile(parts.fileName()))
                 return; // no well-formed file to anchor the profile to
             String profileName = SqliteDatabasePaths.deriveProfileName(parts.dir());
             if (profileName == null) {
@@ -1794,29 +2074,84 @@ public class NodeConfigurationPanel extends JPanel {
                 return;
             }
             if (!DatabaseConfigurationUtils.isValidProfileName(profileName)) {
-                LOGGER.warn(
+                nodeContextLogger().warn(
                         "Skipping auto-created SQLite database profile: invalid profile name '{}'",
                         profileName);
                 return;
             }
             ProfileCreateDefaults.ensureSqliteDatabaseProfile(profileName, dbUrl);
-            LOGGER.info("Auto-created/updated SQLite database profile '{}' (URL: {})",
+            nodeContextLogger().info("Auto-created/updated SQLite database profile '{}' (URL: {})",
                     profileName, dbUrl);
         } catch (Exception e) {
-            LOGGER.warn("Failed to auto-create SQLite database profile", e);
+            nodeContextLogger().warn("Failed to auto-create SQLite database profile", e);
         }
     }
 
     /**
-     * Saves the currently loaded profile: writes the effective UI values to
-     * the profile file (preserving its original format) and refreshes the saved
-     * state, dirty markers and colors.
+     * Saves the currently loaded profile: writes the effective UI values to the
+     * profile's store — the profile FILE (preserving its original format) in
+     * normal mode, the virtual in-memory session profile in wizard mode — and
+     * refreshes the saved state, dirty markers and colors.
      *
      * @return {@code true} on success, {@code false} on failure
      */
     private boolean doSaveCurrentProfile() {
         try {
+            JdbcConfigurationPanel jdbcEditor = jdbcPanel();
+            if (jdbcEditor != null && jdbcEditor.getValidationError() != null) {
+                JOptionPane.showMessageDialog(this, jdbcEditor.getValidationError(), "Invalid Database File",
+                        JOptionPane.ERROR_MESSAGE);
+                return false;
+            }
             Properties propsToSave = getPropertiesFromUI();
+            if (virtualProfile != null) {
+                // VIRTUAL (in-memory) save: the wizard's session profile is the
+                // authoritative store. No file write (the profile file is
+                // created only by the wizard's finish step), no database
+                // assignment metadata and no auto SQLite database profile —
+                // the node profile does not exist on disk yet, and the finish
+                // step applies the same SSOT rules with the final values.
+                isProgrammaticChange = true;
+                try {
+                    // MERGE, never replace: the profile format is minimal
+                    // overrides — getPropertiesFromUI() omits every key whose
+                    // value equals the property's default. A replace would drop
+                    // those keys (and every key the editor does not manage)
+                    // from the session profile, and the wizard's read-back
+                    // would see "absent" where "default" was meant. Per managed
+                    // key the merge mirrors the file save exactly: a value
+                    // present in the editor updates the session profile; an
+                    // absent one (the row reverted to its default) clears the
+                    // stale value; unmanaged keys are kept.
+                    Properties virtualProps = virtualProfile.getProperties();
+                    for (String key : valueSuppliers.keySet()) {
+                        String value = propsToSave.getProperty(key);
+                        if (value != null) {
+                            virtualProps.setProperty(key, value);
+                        } else {
+                            virtualProps.remove(key);
+                        }
+                    }
+                    this.editorProfile = new NodeProfile(loadedProfileName);
+                    this.editorProfile.setProperties(copyProperties(virtualProps));
+                    this.savedProfile.setProperties(copyProperties(virtualProps));
+                    refreshStateAwareEditors(virtualProps);
+                } finally {
+                    isProgrammaticChange = false;
+                }
+                // The wizard has accepted these values into its virtual
+                // session profile, but its disk-saved baseline remains
+                // unchanged until Finish creates the profile file.
+                editorLinkedDb = getLinkedDbProfile();
+                savedLinkedDb = editorLinkedDb;
+                editorDbAutoStart = autoStartDbCheck != null && autoStartDbCheck.isSelected();
+                editorDbAutoStop = autoStopDbCheck != null && autoStopDbCheck.isSelected();
+                savedDbAutoStart = editorDbAutoStart;
+                savedDbAutoStop = editorDbAutoStop;
+                updateDirtyStatus();
+                refreshUIColors();
+                return true;
+            }
             ConfigurationUtils.savePropertiesPreservingFormat(propertiesFile, propsToSave,
                     propertyComponents.keySet());
 
@@ -1824,6 +2159,9 @@ public class NodeConfigurationPanel extends JPanel {
             try {
                 this.savedProfile = new NodeProfile(loadedProfileName);
                 this.savedProfile.setProperties(propsToSave);
+                this.editorProfile = new NodeProfile(loadedProfileName);
+                this.editorProfile.setProperties(copyProperties(propsToSave));
+                refreshStateAwareEditors(propsToSave);
             } finally {
                 isProgrammaticChange = false;
             }
@@ -1841,6 +2179,9 @@ public class NodeConfigurationPanel extends JPanel {
                 // — a link change is unsaved until the profile is saved).
                 savedLinkedDb = getLinkedDbProfile();
             }
+            editorLinkedDb = savedLinkedDb;
+            editorDbAutoStart = savedDbAutoStart;
+            editorDbAutoStop = savedDbAutoStop;
             updateDirtyStatus();
             refreshUIColors();
             return true;
@@ -1849,6 +2190,26 @@ public class NodeConfigurationPanel extends JPanel {
                     JOptionPane.ERROR_MESSAGE);
             e.printStackTrace();
             return false;
+        }
+    }
+
+    private void refreshStateAwareEditors(Properties acceptedValues) {
+        boolean previousProgrammaticChange = isProgrammaticChange;
+        isProgrammaticChange = true;
+        try {
+            for (Map.Entry<JComboBox<String>, StateAwareCombo> entry : stateAwareCombos.entrySet()) {
+                JComboBox<String> comboBox = entry.getKey();
+                Prop<?> prop = entry.getValue().prop();
+                String key = prop.getName();
+                String value = acceptedValues.getProperty(key, defaultValues.get(key));
+                if (value == null) {
+                    value = "";
+                }
+                comboBox.setSelectedItem(propertyValueForEditing(prop, value));
+                updateColor(comboBox, key, defaultValues.get(key));
+            }
+        } finally {
+            isProgrammaticChange = previousProgrammaticChange;
         }
     }
 
@@ -1977,20 +2338,24 @@ public class NodeConfigurationPanel extends JPanel {
                 "What would you like to do?"
         };
         Object[] options = { "Save", "Discard", "Cancel" };
-        int result = JOptionPane.showOptionDialog(this, message, "Unsaved Changes",
-                JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE,
-                null, options, options[0]);
+        Window owner = SwingUtilities.getWindowAncestor(this);
+        JOptionPane optionPane = new JOptionPane(message, JOptionPane.QUESTION_MESSAGE,
+                JOptionPane.YES_NO_CANCEL_OPTION, null, options, options[0]);
+        JDialog dialog = optionPane.createDialog(owner, "Unsaved Changes");
+        dialog.setLocationRelativeTo(owner);
+        dialog.setVisible(true);
+        Object result = optionPane.getValue();
 
-        if (result == JOptionPane.YES_OPTION) {
+        if (Objects.equals(result, options[0])) {
             if (doSaveCurrentProfile()) {
                 if (onProceed != null)
                     onProceed.run();
                 return true;
             }
             return false;
-        } else if (result == JOptionPane.NO_OPTION) {
+        } else if (Objects.equals(result, options[1])) {
             isProgrammaticChange = true;
-            updateUIFromProperties(savedProfile.getProperties());
+            updateUIFromProperties(editorProfile.getProperties());
             updateDirtyStatus();
             isProgrammaticChange = false;
             if (onProceed != null)
@@ -2010,7 +2375,7 @@ public class NodeConfigurationPanel extends JPanel {
         for (PropertyRow row : allPropertyRows) {
             if (isRowDirty(row)) {
                 changesFound = true;
-                String savedValue = savedProfile.getProperty(row.prop.getName());
+                String savedValue = editorProfile.getProperty(row.prop.getName());
                 if (savedValue == null)
                     savedValue = getSafeDefault(row.prop);
                 Supplier<String> supplier = valueSuppliers.get(row.prop.getName());
@@ -2052,21 +2417,11 @@ public class NodeConfigurationPanel extends JPanel {
         if (selected == null) {
             return;
         }
-        // Reserved profiles (node-default) are never listed: they cannot be
-        // copied (SSOT: NodeProfileRepository#isReservedProfileName).
         List<String> profiles = ConfigurationUtils.fetchProfileNames(
                 ConfigurationUtils.getNodeProfilesDir(), null).stream()
-                        .filter(name -> !NodeProfileRepository.isReservedProfileName(name))
                         .collect(Collectors.toList());
-        String source = ProfileCopyDialog.show(this, profiles, selected,
-                ProfileCopyDialog.DEFAULT_CONFIGURATION);
+        String source = ProfileCopyDialog.show(this, profiles, selected);
         if (source == null || source.trim().isEmpty()) {
-            return;
-        }
-        // "Default configuration" (or the dialog's Reset to Defaults button) is the
-        // relocated reset-to-defaults action, replacing the former toolbar button.
-        if (ProfileCopyDialog.DEFAULT_CONFIGURATION.equals(source)) {
-            resetToDefaults();
             return;
         }
 
@@ -2152,7 +2507,7 @@ public class NodeConfigurationPanel extends JPanel {
             // Never leave the user with a silent no-op: any failure while
             // preparing the dialog (or the dialog itself) is surfaced and
             // logged explicitly instead of dying inside the button listener.
-            LOGGER.error("Failed to open the clone dialog for profile '{}'", source, e);
+            nodeContextLogger().error("Failed to open the clone dialog for profile '{}'", source, e);
             JOptionPane.showMessageDialog(this, "Error opening the clone dialog: " + e.getMessage(),
                     "Error", JOptionPane.ERROR_MESSAGE);
             return;
@@ -2173,7 +2528,7 @@ public class NodeConfigurationPanel extends JPanel {
                     "Profile '" + created + "' was created as a clone of '" + source + "'.",
                     "Clone Configuration", JOptionPane.INFORMATION_MESSAGE);
         } catch (IllegalArgumentException | IOException e) {
-            LOGGER.error("Failed to clone profile '{}' -> '{}'", source, newName, e);
+            nodeContextLogger().error("Failed to clone profile '{}' -> '{}'", source, newName, e);
             JOptionPane.showMessageDialog(this, "Error cloning profile: " + e.getMessage(), "Error",
                     JOptionPane.ERROR_MESSAGE);
         }
@@ -2202,11 +2557,34 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     /**
-     * Re-reads the <b>current</b> profile file from disk into the editor, discarding
-     * unsaved UI changes <b>without confirmation</b>. Callers must have already asked
-     * the user (the Reload Profile confirmation, or the Save dialog's Discard action).
+     * Re-reads the <b>current</b> profile into the editor, discarding unsaved UI
+     * changes <b>without confirmation</b> — from the profile file on disk in
+     * normal mode, from the virtual in-memory session profile in wizard mode
+     * (the profile file does not exist yet). Callers must have already asked
+     * the user (the Reload Profile confirmation, or the Save dialog's Discard
+     * action).
      */
     private void reloadFromDisk() {
+        if (virtualProfile != null) {
+            // VIRTUAL (in-memory) reload: the wizard's session profile is the
+            // only source (there is no file on disk to read).
+            Properties loaded = copyProperties(virtualProfile.getProperties());
+            isProgrammaticChange = true;
+            try {
+                editorProfile = new NodeProfile(loadedProfileName);
+                editorProfile.setProperties(copyProperties(loaded));
+                updateUIFromProperties(loaded);
+            } finally {
+                isProgrammaticChange = false;
+            }
+            JdbcConfigurationPanel jdbc = jdbcPanel();
+            if (jdbc != null) {
+                jdbc.resetWorkingState();
+            }
+            loadProfileLinks(loadedProfileName);
+            updateDirtyStatus();
+            return;
+        }
         Path targetFile = ConfigurationUtils.resolveNodeProfilePath(loadedProfileName);
         if (Files.exists(targetFile)) {
             try (FileInputStream in = new FileInputStream(targetFile.toFile())) {
@@ -2215,7 +2593,9 @@ public class NodeConfigurationPanel extends JPanel {
                 try {
                     loaded.load(in);
                     savedProfile = new NodeProfile(loadedProfileName);
-                    savedProfile.setProperties(loaded);
+                    savedProfile.setProperties(copyProperties(loaded));
+                    editorProfile = new NodeProfile(loadedProfileName);
+                    editorProfile.setProperties(copyProperties(loaded));
                     // A reload re-reads the file into the editor and the saved
                     // baseline only. It must NOT move the applied baseline: the
                     // running node keeps its configuration until a restart, so a
@@ -2262,6 +2642,12 @@ public class NodeConfigurationPanel extends JPanel {
         if (loadedProfileName == null) {
             return;
         }
+        if (virtualProfile != null) {
+            // VIRTUAL (in-memory) wizard mode: the node is not started until
+            // the wizard finishes — there is no restart to synchronize with
+            // and no on-disk state to re-anchor the baselines to.
+            return;
+        }
         // A restart (re)loads the on-disk configuration into the node. When
         // there is no unsaved work the editor is refreshed too (a full reload
         // from disk — exactly the Reload button's refresh); while the user is
@@ -2281,7 +2667,7 @@ public class NodeConfigurationPanel extends JPanel {
             this.appliedProfile = new NodeProfile(loadedProfileName);
             this.appliedProfile.setProperties(copyProperties(disk));
         } catch (Exception e) {
-            LOGGER.warn("Could not refresh the applied baseline after the node restart", e);
+            nodeContextLogger().warn("Could not refresh the applied baseline after the node restart", e);
             return;
         }
         this.appliedLinkedDb = databaseLinkOfAppliedProfile();
@@ -2377,7 +2763,7 @@ public class NodeConfigurationPanel extends JPanel {
                             }
                         }));
             } catch (Exception e) {
-                LOGGER.error("Failed to rename profile '{}' -> '{}'", oldProfileName, newName, e);
+                nodeContextLogger().error("Failed to rename profile '{}' -> '{}'", oldProfileName, newName, e);
                 SwingUtilities.invokeLater(() -> {
                     setCursor(previousCursor);
                     setProfileActionButtonsEnabled(true);
@@ -2399,6 +2785,7 @@ public class NodeConfigurationPanel extends JPanel {
                     this.propertiesFile = ConfigurationUtils.resolveNodeProfilePath(newName);
                     this.loadedProfileName = newName;
                     this.savedProfile = new NodeProfile(newName);
+                    this.editorProfile = new NodeProfile(newName);
                 }
                 JOptionPane.showMessageDialog(this,
                         "Profile '" + oldProfileName + "' was renamed to '" + newName + "'.",
@@ -2413,7 +2800,7 @@ public class NodeConfigurationPanel extends JPanel {
      */
     private void setProfileActionButtonsEnabled(boolean enabled) {
         for (JButton button : new JButton[] { newProfileBtn, saveBtn, applyBtn, renameProfileBtn,
-                deleteProfileBtn, copyProfileDataBtn, cloneProfileBtn,
+                deleteProfileBtn, copyProfileDataBtn, cloneProfileBtn, resetToDefaultBtn,
                 reloadProfileBtn, helpBtn }) {
             if (button != null) {
                 button.setEnabled(enabled);
@@ -2466,7 +2853,7 @@ public class NodeConfigurationPanel extends JPanel {
                 // The blocking delete chain (stop → registry teardown → file + metadata → data).
                 ProfileRuntimeService.deleteProfile(name, deleteData);
             } catch (Exception e) {
-                LOGGER.error("Failed to delete profile '{}'", name, e);
+                nodeContextLogger().error("Failed to delete profile '{}'", name, e);
                 SwingUtilities.invokeLater(() -> {
                     setCursor(previousCursor);
                     setProfileActionButtonsEnabled(true);
@@ -2533,7 +2920,8 @@ public class NodeConfigurationPanel extends JPanel {
                         + "<b>Search</b> box filters rows by label, key or value."));
         content.add(HelpDialog.separator());
         content.add(HelpDialog.heading("Toolbar actions"));
-        content.add(HelpDialog.actionRow(FontAwesome.FILE_O, iconColor, "New Profile",
+        content.add(HelpDialog.actionRow(ProfileActionIcon.NEW_PROFILE.normal(GuiConstants.getButtonIconSize()),
+                "New Profile",
                 "Opens the dialog to launch the setup wizard (guided database/connection/node setup) "
                         + "or to create a new empty profile pre-filled with the application default "
                         + "values."));
@@ -2548,18 +2936,17 @@ public class NodeConfigurationPanel extends JPanel {
                         + "yet applied changes."));
         content.add(HelpDialog.actionRow(FontAwesome.PENCIL_SQUARE_O, iconColor, "Rename Profile",
                 "Changes the name of the currently selected configuration profile."));
-        content.add(HelpDialog.actionRow(FontAwesome.REFRESH, iconColor, "Reset to Defaults",
-                "In the Copy Configuration dialog: resets all current settings to their application "
-                        + "default values without saving (via the \"Default configuration\" entry or the "
-                        + "Reset to Defaults button)."));
+        content.add(HelpDialog.actionRow(FontAwesome.UNDO, iconColor, "Reset to Defaults",
+                "Copies the application's hardcoded default values into the current editor "
+                        + "(unsaved). Press Save to persist the reset values to this profile."));
         content.add(HelpDialog.actionRow(FontAwesome.CLIPBOARD, iconColor, "Copy Configuration",
-                "Opens a dialog to copy another profile's configuration — or the built-in \"Default "
-                        + "configuration\" — into the editor of the current profile. The copied values "
-                        + "become unsaved changes you can adjust before saving."));
+                "Opens a dialog to copy another profile's configuration into the editor of the "
+                        + "current profile. The copied values become unsaved changes you can "
+                        + "adjust before saving."));
         content.add(HelpDialog.actionRow(FontAwesome.FILES_O, iconColor, "Clone Configuration",
                 "Creates a new profile from the current (unsaved, editor) effective state; the "
                         + "source profile is left untouched."));
-        content.add(HelpDialog.actionRow(FontAwesome.UNDO, iconColor, "Reload Configuration",
+        content.add(HelpDialog.actionRow(FontAwesome.REFRESH, iconColor, "Reload Configuration",
                 "Reloads the current profile file from disk (e.g. after external edits), discarding "
                         + "any unsaved changes in the UI."));
         content.add(HelpDialog.actionRow(FontAwesome.TRASH_O, GuiColors.getContrastRed(),
@@ -2576,8 +2963,8 @@ public class NodeConfigurationPanel extends JPanel {
                         + "that baseline; <b>Applied</b> means it matches the loaded profile value. "
                         + "The search field matches property names, keys and values, while the Show values "
                         + "checkboxes filter rows by state.<br><br>"
-                        + "The <b>database</b> profile link is managed on the Database tab's "
-                        + "\u201CLinked Database Profile\u201D control, and the <b>logging</b> "
+                        + "The <b>database</b> profile link is managed on the Database tab's \"Linked "
+                        + "Database Profile\" / \"Custom db.URL\" selector, and the <b>logging</b> "
                         + "profile assignment on the Logging tab.<br><br>"
                         + "Profiles are stored as \".properties\" files within the node "
                         + "sub-directory of the configuration folder."));
@@ -2594,14 +2981,15 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private boolean isRowDirty(PropertyRow row) {
-        String savedValue = savedProfile.getProperty(row.prop.getName());
+        String savedValue = editorProfile.getProperty(row.prop.getName());
         boolean isDefault = (savedValue == null);
-        // 'current' here represents the effective value from the file, considering
-        // defaults
+        // Compare with the accepted editor/session value, resolving its default.
         String saved = isDefault ? getSafeDefault(row.prop) : savedValue;
         if (saved == null)
             saved = "";
-        saved = saved.trim();
+        if (!Props.NODE_DEBUG_TRACE_SEPARATOR.getName().equals(row.prop.getName())) {
+            saved = saved.trim();
+        }
 
         Supplier<String> supplier = valueSuppliers.get(row.prop.getName());
         String val = (supplier != null) ? supplier.get() : "";
@@ -2625,13 +3013,15 @@ public class NodeConfigurationPanel extends JPanel {
             String normalizedVal = normalizeListValue(val, "\n");
             String normalizedSaved = normalizeListValue(saved, ";");
             dirty = !normalizedVal.equals(normalizedSaved);
+        } else if (Props.NODE_DEBUG_TRACE_SEPARATOR.getName().equals(row.prop.getName())) {
+            dirty = !val.equals(saved);
         } else {
             dirty = !val.trim().equals(saved.trim());
         }
 
         if (Props.DB_URL.getName().equals(row.prop.getName())) {
             // The JDBC row is dirty when any of its effective values
-            // (URL / username / password) differs from the saved ones —
+            // (URL / username / password) differs from the accepted values —
             // the tuple model (the link itself is isDbLinkDirty's job).
             return jdbcValuesDirty();
         }
@@ -2641,9 +3031,11 @@ public class NodeConfigurationPanel extends JPanel {
 
     private boolean isComponentDirty(Prop<?> prop) {
         String key = prop.getName();
-        String saved = savedProfile.getProperty(key, getSafeDefault(prop));
+        String saved = editorProfile.getProperty(key, getSafeDefault(prop));
         String current = valueSuppliers.get(key) != null ? valueSuppliers.get(key).get() : "";
-        return !current.trim().equals(saved.trim());
+        return Props.NODE_DEBUG_TRACE_SEPARATOR.getName().equals(key)
+                ? !current.equals(saved)
+                : !current.trim().equals(saved.trim());
     }
 
     /**
@@ -2756,9 +3148,11 @@ public class NodeConfigurationPanel extends JPanel {
         // The auto start/stop flags only count while their row is visible
         // (server engines — for SQLite the row is hidden and the flags are
         // N/A, so a stale checkbox state must not mark the row dirty).
-        return !savedLinkedDb.equals(getLinkedDbProfile()) ||
-                (autoStartDbCheck != null && autoStartDbCheck.isVisible() && savedDbAutoStart != autoStartDbCheck.isSelected()) ||
-                (autoStopDbCheck != null && autoStopDbCheck.isVisible() && savedDbAutoStop != autoStopDbCheck.isSelected());
+        return !editorLinkedDb.equals(getLinkedDbProfile()) ||
+                (autoStartDbCheck != null && autoStartDbCheck.isVisible()
+                        && editorDbAutoStart != autoStartDbCheck.isSelected()) ||
+                (autoStopDbCheck != null && autoStopDbCheck.isVisible()
+                        && editorDbAutoStop != autoStopDbCheck.isSelected());
     }
 
 
@@ -2797,9 +3191,9 @@ public class NodeConfigurationPanel extends JPanel {
                 JdbcConfigurationPanel p = jdbcPanel();
                 if (p != null) {
                     p.forceManual(val, user, pass);
-                    JCheckBox useProfileCheck = (JCheckBox) comp.getClientProperty("useProfileCheck");
-                    if (useProfileCheck != null && useProfileCheck.isSelected()) {
-                        useProfileCheck.setSelected(false);
+                    LinkedDbModeSelector useProfileCheck = (LinkedDbModeSelector) comp.getClientProperty("useProfileCheck");
+                    if (useProfileCheck != null && useProfileCheck.isLinkedMode()) {
+                        useProfileCheck.setLinkedMode(false);
                     }
                 }
                 updateColor(comp, key, defaultValues.get(key));
@@ -2825,7 +3219,10 @@ public class NodeConfigurationPanel extends JPanel {
                         || "on".equalsIgnoreCase(val);
                 ((JCheckBox) comp).setSelected(isSelected);
             } else if (comp instanceof JComboBox) {
-                ((JComboBox<?>) comp).setSelectedItem(val);
+                StateAwareCombo stateAware = stateAwareCombos.get(comp);
+                ((JComboBox<?>) comp).setSelectedItem(stateAware == null
+                        ? ConfigurationUtils.propertyValueForEditing(val)
+                        : propertyValueForEditing(stateAware.prop(), val));
             } else if (comp instanceof javax.swing.text.JTextComponent) {
                 ((javax.swing.text.JTextComponent) comp).setText(val);
             }
@@ -2835,7 +3232,7 @@ public class NodeConfigurationPanel extends JPanel {
 
     private String[] getSuggestions(String propName) {
         Set<String> suggestions = new LinkedHashSet<>();
-        String current = savedProfile.getProperty(propName);
+        String current = editorProfile.getProperty(propName);
         if (current != null && !current.isEmpty()) {
             suggestions.add(current);
         }
@@ -2843,10 +3240,10 @@ public class NodeConfigurationPanel extends JPanel {
         // TODO check this part (why don't use Signum constants and utility method for
         // this?)
         Path[] paths = {
-                PathUtils.resolvePath(confFolder).resolve(ModuleIds.NODE).resolve("node-default.properties"),
-                PathUtils.resolvePath("conf/node/node-default.properties"),
-                PathUtils.resolvePath("../conf/node/node-default.properties"),
-                PathUtils.resolvePath("node/node/node-default.properties")
+                PathUtils.resolvePath(confFolder).resolve(ModuleIds.NODE).resolve("profiles/template/node-default.properties"),
+                PathUtils.resolvePath("conf/node/profiles/template/node-default.properties"),
+                PathUtils.resolvePath("../conf/node/profiles/template/node-default.properties"),
+                PathUtils.resolvePath("node/node/profiles/template/node-default.properties")
         };
 
         for (Path path : paths) {
@@ -2882,8 +3279,41 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private JPanel createCategoryPanel(int rowGap) {
-        JPanel panel = new JPanel(new MigLayout("fillx, insets 10, gap " + rowGap, "[][grow]", ""));
-        return panel;
+        MigLayout layout = new MigLayout("fillx, insets 10, gap " + rowGap, "[][grow]", "");
+        return wizardMode ? new ViewportWidthPanel(layout) : new JPanel(layout);
+    }
+
+    private static final class ViewportWidthPanel extends JPanel implements Scrollable {
+        private ViewportWidthPanel(LayoutManager layout) {
+            super(layout);
+        }
+
+        @Override
+        public Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+
+        @Override
+        public int getScrollableUnitIncrement(Rectangle visibleRect, int orientation, int direction) {
+            return 16;
+        }
+
+        @Override
+        public int getScrollableBlockIncrement(Rectangle visibleRect, int orientation, int direction) {
+            return Math.max(16, orientation == SwingConstants.HORIZONTAL
+                    ? visibleRect.width - 16 : visibleRect.height - 16);
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportWidth() {
+            return getParent() instanceof JViewport viewport
+                    && viewport.getWidth() >= getMinimumSize().width;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportHeight() {
+            return false;
+        }
     }
 
     private void finalizeCategoryPanel(JPanel panel) {
@@ -2894,6 +3324,24 @@ public class NodeConfigurationPanel extends JPanel {
         JScrollPane scrollPane = new JScrollPane(panel);
         scrollPane.getVerticalScrollBar().setUnitIncrement(16);
         scrollPane.setBorder(BorderFactory.createEmptyBorder());
+        if (wizardMode) {
+            // Wizard mode (the ~900px advanced dialog): the category content's
+            // PREFERRED width — a long label column next to a wide input row
+            // (the Database tab measures ~1114px: 409px labels + the 682px JDBC
+            // row) — exceeds the dialog viewport, which is what made the
+            // dialog's horizontal scrollbar appear even though every element
+            // FITS (the content's minimum width, ~723px, is well below the
+            // dialog width). The scroll pane's preferred width is capped so
+            // the tabbed pane's preferred size stays inside the dialog width
+            // (no OUTER horizontal scrollbar either). Allow inner tabs to
+            // scroll only when their minimum content width cannot fit, keeping
+            // controls such as the port restore and help icons reachable.
+            scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+            Dimension pref = panel.getPreferredSize();
+            if (pref.width > WIZARD_TAB_MAX_PREF_WIDTH) {
+                scrollPane.setPreferredSize(new Dimension(WIZARD_TAB_MAX_PREF_WIDTH, pref.height));
+            }
+        }
         return scrollPane;
     }
 
@@ -2928,7 +3376,7 @@ public class NodeConfigurationPanel extends JPanel {
         // freshly loaded profile values "saved" instead of "applied". Kept for
         // API compatibility: ConfigurationPanel still invokes it on node
         // state changes.
-        LOGGER.debug("loadAppliedProperties - no-op: the loaded profile values are the applied baseline");
+        nodeContextLogger().debug("loadAppliedProperties - no-op: the loaded profile values are the applied baseline");
     }
 
     private void addSectionHeader(JPanel panel, String title, boolean isFirst) {
@@ -2948,10 +3396,11 @@ public class NodeConfigurationPanel extends JPanel {
         panel.add(label, row.labelConstraints);
 
         // Input Component
-        String savedValue = savedProfile.getProperty(prop.getName());
+        String savedValue = editorProfile.getProperty(prop.getName());
         if (savedValue == null) {
             savedValue = getSafeDefault(prop);
         }
+        savedValue = propertyValueForEditing(prop, savedValue);
         defaultValues.put(prop.getName(), getSafeDefault(prop));
 
         JComponent inputComponent;
@@ -2979,14 +3428,17 @@ public class NodeConfigurationPanel extends JPanel {
                 comboBox = new JComboBox<>(options);
                 comboBox.setPrototypeDisplayValue("Prototype");
                 comboBox.setSelectedItem(savedValue);
-                valueSuppliers.put(prop.getName(), () -> (String) comboBox.getSelectedItem());
+                valueSuppliers.put(prop.getName(),
+                        () -> ConfigurationUtils.propertyValueFromEditing((String) comboBox.getSelectedItem()));
             } else {
                 // The saved value is not in the fixed options (a custom value):
                 // the select joins the state-aware value model — editable, with
                 // the option catalog plus the state's baseline values in its
                 // dropdown, exactly like the regular input rows.
                 comboBox = createStateAwareValueCombo(prop, savedValue, options);
-                valueSuppliers.put(prop.getName(), () -> stateAwareComboText(comboBox));
+                valueSuppliers.put(prop.getName(),
+                        () -> ConfigurationUtils.propertyValueFromEditing(
+                                propertyComboText(prop, comboBox)));
             }
             ConfigurationUtils.fixComponentSize(comboBox);
             inputComponent = comboBox;
@@ -3009,14 +3461,51 @@ public class NodeConfigurationPanel extends JPanel {
             // user can pick a baseline back in one click.
             JComboBox<String> comboBox = createStateAwareValueCombo(prop, savedValue, null);
             inputComponent = comboBox;
-            valueSuppliers.put(prop.getName(), () -> stateAwareComboText(comboBox));
+            valueSuppliers.put(prop.getName(),
+                    () -> ConfigurationUtils.propertyValueFromEditing(
+                            propertyComboText(prop, comboBox)));
+        }
+
+        JTextArea portValidationLabel = null;
+        JButton portRestoreButton = null;
+        if (isValidatedPort(prop)) {
+            portValidationLabel = new JTextArea(2, 32);
+            portValidationLabel.setEditable(false);
+            portValidationLabel.setFocusable(false);
+            portValidationLabel.setLineWrap(true);
+            portValidationLabel.setWrapStyleWord(true);
+            portValidationLabel.setOpaque(false);
+            portValidationLabel.setFont(UIManager.getFont("Label.font"));
+            portValidationLabel.setForeground(GuiColors.getContrastRed());
+            portValidationLabel.setVisible(false);
+            portValidationLabels.put(prop.getName(), portValidationLabel);
+
+            portRestoreButton = new JButton();
+            portRestoreButton.setToolTipText("Set back to saved");
+            ConfigurationUtils.styleProfileIconButton(portRestoreButton, FontAwesome.UNDO,
+                    GuiColors.getButtonIcon(), GuiConstants.getToolBarIconSize());
+            portRestoreButton.setVisible(false);
+            portRestoreButton.addActionListener(event -> restoreSavedPort(prop));
+            portRestoreButtons.put(prop.getName(), portRestoreButton);
+            row.extra = portRestoreButton;
+            row.extraConstraints = "hidemode 3";
+            row.validation = portValidationLabel;
+            row.validationConstraints = "skip 1, span 2, growx, wrap, hidemode 3";
         }
 
         updateColor(inputComponent, prop.getName(), getSafeDefault(prop));
         row.inputConstraints = inputComponent instanceof JCheckBox
-                ? "split 2, height pref!" : "split 2, growx, height pref!";
+                ? "split 2, height pref!"
+                : "split " + (portRestoreButton == null ? 2 : 3) + ", growx, height pref!";
         panel.add(inputComponent, row.inputConstraints);
+        if (portRestoreButton != null) {
+            panel.add(portRestoreButton, row.extraConstraints);
+        }
         propertyComponents.put(prop.getName(), inputComponent);
+        if (Props.NODE_DEBUG_TRACE_SEPARATOR.getName().equals(prop.getName())
+            && inputComponent instanceof JComboBox<?> comboBox) {
+        installDebugTraceSeparatorEditor((JComboBox<String>) comboBox);
+        }
 
         // Help Button
         JButton helpBtn = new HelpButton();
@@ -3029,13 +3518,117 @@ public class NodeConfigurationPanel extends JPanel {
         row.input = inputComponent;
 
         row.help = helpBtn;
-        row.helpConstraints = "wrap";
+        row.helpConstraints = "gapleft " + ConfigurationUtils.INPUT_ACTION_GAP + ", wrap";
         panel.add(helpBtn, row.helpConstraints);
+        if (portValidationLabel != null) {
+            panel.add(portValidationLabel, row.validationConstraints);
+            installPortValidationListener(prop, inputComponent);
+            updatePortValidation(prop);
+        }
         row.separator = new JSeparator();
-        row.separatorConstraints = "span, growx, wrap, gaptop 2, gapbottom 2";
+        row.separatorConstraints = ConfigurationUtils.PROPERTY_SEPARATOR_CONSTRAINTS;
         panel.add(row.separator, row.separatorConstraints);
 
         addPropertyRow(row);
+    }
+
+    private static boolean isValidatedPort(Prop<?> prop) {
+        return Props.API_PORT.getName().equals(prop.getName())
+                || Props.P2P_PORT.getName().equals(prop.getName())
+                || Props.API_WEBSOCKET_PORT.getName().equals(prop.getName());
+    }
+
+    private void installPortValidationListener(Prop<?> prop, JComponent input) {
+        if (!(input instanceof JComboBox<?> comboBox) || !comboBox.isEditable()) {
+            return;
+        }
+        JComponent editorComponent = (JComponent) comboBox.getEditor().getEditorComponent();
+        javax.swing.text.JTextComponent editorText = findEditorText(editorComponent);
+        if (editorText != null) {
+            editorText.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+                @Override
+                public void insertUpdate(javax.swing.event.DocumentEvent event) {
+                    schedulePortValidation(prop);
+                }
+
+                @Override
+                public void removeUpdate(javax.swing.event.DocumentEvent event) {
+                    schedulePortValidation(prop);
+                }
+
+                @Override
+                public void changedUpdate(javax.swing.event.DocumentEvent event) {
+                    schedulePortValidation(prop);
+                }
+            });
+        }
+        comboBox.addActionListener(event -> schedulePortValidation(prop));
+    }
+
+    private void schedulePortValidation(Prop<?> prop) {
+        SwingUtilities.invokeLater(() -> updatePortValidation(prop));
+    }
+
+    private void updatePortValidation(Prop<?> prop) {
+        String key = prop.getName();
+        Supplier<String> supplier = valueSuppliers.get(key);
+        String value = supplier == null ? "" : supplier.get();
+        String error = ConfigurationUtils.portValidationError(portLabel(prop), value);
+        JTextArea validationLabel = portValidationLabels.get(key);
+        if (validationLabel != null) {
+            validationLabel.setText(error == null ? "" : error);
+            validationLabel.setVisible(error != null);
+            validationLabel.setToolTipText(error);
+        }
+
+        JComponent input = propertyComponents.get(key);
+        // Guard the editor: during an L&F update (updateUI) it is briefly NULL.
+        if (input instanceof JComboBox<?> comboBox && comboBox.isEditable()
+                && comboBox.getEditor() != null) {
+            JComponent editor = (JComponent) comboBox.getEditor().getEditorComponent();
+            javax.swing.text.JTextComponent editorText = findEditorText(editor);
+            if (editorText != null) {
+                editorText.putClientProperty(FlatClientProperties.OUTLINE,
+                        error == null ? null : FlatClientProperties.OUTLINE_ERROR);
+                editorText.setToolTipText(error);
+            }
+            editor.putClientProperty(FlatClientProperties.OUTLINE,
+                    error == null ? null : FlatClientProperties.OUTLINE_ERROR);
+            comboBox.setToolTipText(error);
+        }
+        JButton restoreButton = portRestoreButtons.get(key);
+        if (restoreButton != null) {
+            restoreButton.setVisible(error != null);
+        }
+        if (validationLabel != null && validationLabel.getParent() != null) {
+            validationLabel.getParent().revalidate();
+            validationLabel.getParent().repaint();
+        }
+    }
+
+    private static String portLabel(Prop<?> prop) {
+        if (Props.API_PORT.getName().equals(prop.getName())) {
+            return "API port";
+        }
+        if (Props.P2P_PORT.getName().equals(prop.getName())) {
+            return "P2P port";
+        }
+        return "WebSocket port";
+    }
+
+    private void restoreSavedPort(Prop<?> prop) {
+        String key = prop.getName();
+        String saved = savedProfile.getProperties().getProperty(key);
+        String value = saved != null
+                ? saved
+                : appliedProfile.getProperties().getProperty(key, getSafeDefault(prop));
+        JComponent input = propertyComponents.get(key);
+        if (input instanceof JComboBox<?> comboBox && comboBox.isEditable()) {
+            comboBox.getEditor().setItem(value);
+            updatePortValidation(prop);
+            updateColor(input, key, getSafeDefault(prop));
+            updateDirtyStatus();
+        }
     }
 
     /**
@@ -3077,7 +3670,7 @@ public class NodeConfigurationPanel extends JPanel {
         } finally {
             isProgrammaticChange = prevFlag;
         }
-        comboBox.setRenderer(stateAwareItemRenderer(prop, () -> stateAwareComboText(comboBox)));
+        comboBox.setRenderer(stateAwareItemRenderer(prop, () -> propertyComboText(prop, comboBox)));
         // The editor text IS the value — track its changes exactly like the old
         // plain text fields did. The L&F alone is not reliable for this: the
         // Metal editor's text field is NOT the editor component, so Swing does
@@ -3173,6 +3766,56 @@ public class NodeConfigurationPanel extends JPanel {
         return item == null ? "" : item.toString().trim();
     }
 
+    private static String propertyComboText(Prop<?> prop, JComboBox<String> comboBox) {
+        // During an L&F update (updateUI) the combo's UI is swapped and the editor is
+        // briefly NULL — fall back to the selected item so renderers and value suppliers
+        // cannot NPE in that window (same guard as stateAwareComboText).
+        var editor = comboBox.getEditor();
+        Object item = editor != null ? editor.getItem() : comboBox.getSelectedItem();
+        String text = item == null ? "" : item.toString();
+        return Props.NODE_DEBUG_TRACE_SEPARATOR.getName().equals(prop.getName())
+                ? text
+                : text.trim();
+    }
+
+    private void installDebugTraceSeparatorEditor(JComboBox<String> comboBox) {
+        javax.swing.text.JTextComponent editor =
+                findEditorText((JComponent) comboBox.getEditor().getEditorComponent());
+        if (editor == null) {
+            throw new IllegalStateException("Debug trace separator editor is not a text component");
+        }
+        if (editor.getDocument() instanceof javax.swing.text.AbstractDocument document) {
+            document.setDocumentFilter(new javax.swing.text.DocumentFilter() {
+                @Override
+                public void insertString(FilterBypass bypass, int offset, String text,
+                        javax.swing.text.AttributeSet attributes) throws BadLocationException {
+                    super.insertString(bypass, offset, ConfigurationUtils.encodeWhitespaceForEditing(text), attributes);
+                }
+
+                @Override
+                public void replace(FilterBypass bypass, int offset, int length, String text,
+                        javax.swing.text.AttributeSet attributes) throws BadLocationException {
+                    super.replace(bypass, offset, length, ConfigurationUtils.encodeWhitespaceForEditing(text),
+                            attributes);
+                }
+            });
+        }
+        editor.setFocusTraversalKeysEnabled(false);
+        editor.getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke("TAB"), "insertVisibleTabEscape");
+        editor.getActionMap().put("insertVisibleTabEscape", new AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent event) {
+                editor.replaceSelection("\\t");
+            }
+        });
+    }
+
+    private static String propertyValueForEditing(Prop<?> prop, String value) {
+        return Props.NODE_DEBUG_TRACE_SEPARATOR.getName().equals(prop.getName())
+                ? ConfigurationUtils.debugTraceSeparatorForEditing(value)
+                : ConfigurationUtils.propertyValueForEditing(value);
+    }
+
     /**
      * Rebuilds the dropdown of one state-aware select from the row's current
      * 4-state ({@link ProfileValueState}): the option catalog (when the row
@@ -3194,11 +3837,13 @@ public class NodeConfigurationPanel extends JPanel {
         }
         rebuildingCombos.add(comboBox);
         try {
-            String current = stateAwareComboText(comboBox);
-            String saved = savedValue == null ? getSafeDefault(prop) : savedValue;
+            String current = propertyComboText(prop, comboBox);
+            String saved = propertyValueForEditing(prop,
+                    savedValue == null ? getSafeDefault(prop) : savedValue);
             String applied = appliedProfile.getProperty(prop.getName());
             if (applied == null)
                 applied = getSafeDefault(prop);
+            applied = propertyValueForEditing(prop, applied);
             LinkedHashSet<String> items = new LinkedHashSet<>();
             StateAwareCombo info = stateAwareCombos.get(comboBox);
             String[] options = info == null ? null : info.options();
@@ -3208,7 +3853,7 @@ public class NodeConfigurationPanel extends JPanel {
             }
             if (!current.isEmpty())
                 items.add(current);
-            for (String baseline : ProfileValueState.dropdownBaselines(false, current, saved, applied)) {
+            for (String baseline : propertyDropdownBaselines(prop, current, saved, applied)) {
                 items.add(baseline);
             }
             // Every editor / model touch below is PROGRAMMATIC, so it runs
@@ -3288,7 +3933,9 @@ public class NodeConfigurationPanel extends JPanel {
                         if (applied == null) {
                             applied = getSafeDefault(prop);
                         }
-                        return itemStatus(text, currentValue.get(), saved, applied).tooltip();
+                        saved = propertyValueForEditing(prop, saved);
+                        applied = propertyValueForEditing(prop, applied);
+                        return propertyItemStatus(prop, text, currentValue.get(), saved, applied).tooltip();
                     });
                 }
                 Component c = super.getListCellRendererComponent(
@@ -3300,7 +3947,10 @@ public class NodeConfigurationPanel extends JPanel {
                     String applied = appliedProfile.getProperty(prop.getName());
                     if (applied == null)
                         applied = getSafeDefault(prop);
-                    ValueStatus status = itemStatus((String) value, currentValue.get(), saved, applied);
+                    saved = propertyValueForEditing(prop, saved);
+                    applied = propertyValueForEditing(prop, applied);
+                    ValueStatus status = propertyItemStatus(
+                            prop, (String) value, currentValue.get(), saved, applied);
                     c.setForeground(status.color());
                     ((JComponent) c).setToolTipText(status.tooltip());
                 }
@@ -3319,27 +3969,17 @@ public class NodeConfigurationPanel extends JPanel {
         row.labelConstraints = "align label, aligny top";
         panel.add(label, row.labelConstraints);
 
-        // Two columns: the checkbox row is [Linked Database Profile][?] —
-        // when a question-mark help icon follows a check box, the two must
-        // sit on the SAME row, the ? vertically centered on that row (its
-        // MigLayout default center alignment). The editor + auto start/stop
-        // rows span both columns.
-        JPanel wrapper = new JPanel(new MigLayout("insets 0, fillx, gap 2", "[grow][]", "[]5[]"));
+        // The database-URL source selector (two stacked radio buttons:
+        // "Linked Database Profile" / "Custom db.URL") — the row is
+        // [selector][+][?] — when the "+" create-profile button and the
+        // question-mark help icon follow the selector, all three must sit on
+        // the SAME row, vertically centered on that row (their MigLayout
+        // default center alignment). The editor + auto start/stop rows span
+        // the columns.
+        JPanel wrapper = new JPanel(new MigLayout("insets 0, fillx, gap 2", "[grow][][]", "[]5[]"));
         wrapper.setOpaque(false);
 
-        JCheckBox useProfileCheck = new JCheckBox("Linked Database Profile");
-        useProfileCheck.setOpaque(false);
-        wrapper.add(useProfileCheck);
-
-        // The row's ? help icon lives in the checkbox row (NOT in the
-        // separate help column): on a tall JDBC card the help column would
-        // span the whole section and the ? could not be centered on the
-        // checkbox row alone. Row model: row.help stays null (search view
-        // and restore skip null parts) — the button travels inside the
-        // wrapper with the row.
-        JButton helpBtn = new HelpButton();
-        helpBtn.addActionListener(e -> showHelp(prop, labelText));
-        wrapper.add(helpBtn, "wrap");
+        LinkedDbModeSelector useProfileCheck = new LinkedDbModeSelector();
 
         final boolean[] jdbcInitialized = { false };
         Runnable jdbcOnChange = () -> {
@@ -3355,7 +3995,37 @@ public class NodeConfigurationPanel extends JPanel {
         // visible rows).
         JdbcConfigurationPanel jdbcPanel = new JdbcConfigurationPanel(confFolder, jdbcOnChange,
                 this::onJdbcLinkChanged);
-        wrapper.add(jdbcPanel, "span 2, growx");
+
+        wrapper.add(useProfileCheck);
+
+        // The discreet "+" — the profile-toolbar flat icon-button style (the same
+        // look as the profile panel's New Profile button, the same order the install
+        // wizard's link row uses): creates a new database profile for the engine the
+        // editor currently shows — the editor's profile select is a plain
+        // (non-editable) dropdown over existing profiles, so this button is the only
+        // way to create one from the DB.Url row — and links it (prefilled with this
+        // node profile's name).
+        JButton createDbProfileBtn = new JButton();
+        createDbProfileBtn.setFocusable(false);
+        createDbProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip(
+                "Create a new database profile for this engine with the database-profile "
+                        + "wizard (prefilled with this node profile's name), and use it as "
+                        + "this node's database."));
+        ConfigurationUtils.styleNewProfileButton(createDbProfileBtn);
+        createDbProfileBtn.addActionListener(e -> onCreateDbProfileClick(jdbcPanel));
+        wrapper.add(createDbProfileBtn);
+
+        // The row's ? help icon lives in the checkbox row (NOT in the
+        // separate help column): on a tall JDBC card the help column would
+        // span the whole section and the ? could not be centered on the
+        // checkbox row alone. Row model: row.help stays null (search view
+        // and restore skip null parts) — the button travels inside the
+        // wrapper with the row.
+        JButton helpBtn = new HelpButton();
+        helpBtn.addActionListener(e -> showHelp(prop, labelText));
+        wrapper.add(helpBtn, "wrap");
+
+        wrapper.add(jdbcPanel, "span 3, growx");
 
         // The panel is the single "card" of the row (the client-property
         // contract the auto-link integration test reads).
@@ -3378,19 +4048,21 @@ public class NodeConfigurationPanel extends JPanel {
         autoDbRow.setOpaque(false);
         autoDbRow.add(autoStartDbCheck);
         autoDbRow.add(autoStopDbCheck);
-        wrapper.add(autoDbRow, "span 2, gaptop 4");
+        wrapper.add(autoDbRow, "span 3, gaptop 4");
 
-        // The host's "Linked Database Profile" checkbox drives the panel's
-        // link mode; the panel may auto-unlink itself (e.g. an unmaterializable
-        // link at load) — onJdbcLinkChanged keeps the checkbox in sync.
-        useProfileCheck.addActionListener(e -> {
+        // The host's database-URL source selector drives the panel's link
+        // mode; the panel may auto-unlink itself (e.g. an unmaterializable
+        // link at load) — onJdbcLinkChanged keeps the selector in sync.
+        java.awt.event.ActionListener linkModeListener = e -> {
             if (isProgrammaticChange)
                 return;
-            jdbcPanel.requestLinkMode(useProfileCheck.isSelected());
+            jdbcPanel.requestLinkMode(useProfileCheck.isLinkedMode());
             updateAutoDbCheckboxesState(); // the panel's engine may differ
             updateDirtyStatus();
             refreshUIColors();
-        });
+        };
+        useProfileCheck.getLinkedRadio().addActionListener(linkModeListener);
+        useProfileCheck.getCustomRadio().addActionListener(linkModeListener);
 
         // Client-property contract (the auto-link integration test reads
         // these): the JDBC panel is the single card of the row.
@@ -3422,14 +4094,23 @@ public class NodeConfigurationPanel extends JPanel {
         propertyComponents.put(Props.DB_USERNAME.getName(), (JComponent) jdbcPanel.getUserEditComponent());
         propertyComponents.put(Props.DB_PASSWORD.getName(), (JComponent) jdbcPanel.getPassField());
 
-        String savedValue = savedProfile.getProperty(prop.getName(), getSafeDefault(prop));
-        String savedUser = savedProfile.getProperty(Props.DB_USERNAME.getName(),
+        String savedValue = editorProfile.getProperty(prop.getName(), getSafeDefault(prop));
+        String savedUser = editorProfile.getProperty(Props.DB_USERNAME.getName(),
                 getSafeDefault(Props.DB_USERNAME));
-        String savedPass = savedProfile.getProperty(Props.DB_PASSWORD.getName(),
+        String savedPass = editorProfile.getProperty(Props.DB_PASSWORD.getName(),
                 getSafeDefault(Props.DB_PASSWORD));
 
         jdbcInitialized[0] = true;
         jdbcPanel.loadManual(savedValue, savedUser, savedPass);
+        // The radios follow the editor's (just loaded manual) link mode — the
+        // load pass never fires the link callback, so the selector is synced
+        // here (the former check box was unchecked by default).
+        isProgrammaticChange = true;
+        try {
+            useProfileCheck.setLinkedMode(jdbcPanel.isLinkedMode());
+        } finally {
+            isProgrammaticChange = false;
+        }
 
         defaultValues.put(prop.getName(), getSafeDefault(prop));
         defaultValues.put(Props.DB_USERNAME.getName(), getSafeDefault(Props.DB_USERNAME));
@@ -3451,7 +4132,7 @@ public class NodeConfigurationPanel extends JPanel {
         updateAutoDbCheckboxesState();
 
         row.separator = new JSeparator();
-        row.separatorConstraints = "span, growx, wrap, gaptop 2, gapbottom 2";
+        row.separatorConstraints = ConfigurationUtils.PROPERTY_SEPARATOR_CONSTRAINTS;
         panel.add(row.separator, row.separatorConstraints);
         addPropertyRow(row);
         updateColor(wrapper, prop.getName(), defaultValues.get(prop.getName()));
@@ -3468,7 +4149,7 @@ public class NodeConfigurationPanel extends JPanel {
         panel.add(label, row.labelConstraints);
 
         // Input Component
-        String savedValue = savedProfile.getProperty(prop.getName());
+        String savedValue = editorProfile.getProperty(prop.getName());
         if (savedValue == null) {
             savedValue = getSafeDefault(prop);
         }
@@ -3518,11 +4199,11 @@ public class NodeConfigurationPanel extends JPanel {
         helpBtn.setToolTipText("Click for more info");
         helpBtn.addActionListener(e -> showHelp(prop, labelText));
         row.help = helpBtn;
-        row.helpConstraints = "wrap";
+        row.helpConstraints = "gapleft " + ConfigurationUtils.INPUT_ACTION_GAP + ", wrap";
         panel.add(helpBtn, row.helpConstraints);
 
         row.separator = new JSeparator();
-        row.separatorConstraints = "span, growx, wrap, gaptop 2, gapbottom 2";
+        row.separatorConstraints = ConfigurationUtils.PROPERTY_SEPARATOR_CONSTRAINTS;
         panel.add(row.separator, row.separatorConstraints);
 
         valueSuppliers.put(prop.getName(), () -> new String(passwordField.getPassword()));
@@ -3575,7 +4256,7 @@ public class NodeConfigurationPanel extends JPanel {
         try {
             new LoggingAssignmentStore(confFolder).setAssignmentForModule(loadedProfileName, ModuleIds.NODE, value);
         } catch (Exception e) {
-            LOGGER.error("Error setting linked logging profile", e);
+            nodeContextLogger().error("Error setting linked logging profile", e);
         }
     }
 
@@ -3603,7 +4284,7 @@ public class NodeConfigurationPanel extends JPanel {
         row.labelConstraints = "align label, aligny top";
         panel.add(label, row.labelConstraints);
 
-        String savedValue = savedProfile.getProperty(prop.getName());
+        String savedValue = editorProfile.getProperty(prop.getName());
         if (savedValue == null) {
             savedValue = getSafeDefault(prop);
         }
@@ -3632,7 +4313,7 @@ public class NodeConfigurationPanel extends JPanel {
             wrapper.add(editor, BorderLayout.CENTER);
 
             JButton convertBtn = new JButton(
-                    IconFontSwing.buildIcon(FontAwesome.MAGIC, GuiConstants.getHelpIconSize(),
+                    IconFontCache.buildIcon(FontAwesome.MAGIC, GuiConstants.getHelpIconSize(),
                             GuiColors.getHelpIcon()));
             convertBtn.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0));
             convertBtn.setContentAreaFilled(false);
@@ -3673,7 +4354,7 @@ public class NodeConfigurationPanel extends JPanel {
         // separate help column for list rows).
         editor.helpAction = () -> showHelp(prop, labelText);
         row.separator = new JSeparator();
-        row.separatorConstraints = "span, growx, wrap, gaptop 2, gapbottom 2";
+        row.separatorConstraints = ConfigurationUtils.PROPERTY_SEPARATOR_CONSTRAINTS;
         panel.add(row.separator, row.separatorConstraints);
 
         row.input = valueComponent;
@@ -3830,12 +4511,10 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     /**
-     * The effective "Default" baseline of a property: the user-editable
-     * {@code default.properties} L1 layer value when the user
-     * activated a line there, otherwise the hardcoded L0 default — the SSOT
-     * is {@link EffectiveNodeProps#baselineValue}. Every row state, the
+     * The effective "Default" baseline of a property: the hardcoded L0 default —
+     * the SSOT is {@link EffectiveNodeProps#baselineValue}. Every row state, the
      * reset-to-defaults action and the clone diff run against this baseline,
-     * so a profile file only ever needs to store the non-L1 overrides.
+     * so a profile file only ever needs to store the overrides.
      */
     private String getSafeDefault(Prop<?> prop) {
         return EffectiveNodeProps.baselineValue(prop.getName(), prop.getDefaultValue());
@@ -3845,8 +4524,8 @@ public class NodeConfigurationPanel extends JPanel {
      * The four value-level states that drive the row color coding and the
      * search-panel visibility checkboxes. The state of a value is the relation
      * between the THREE values the profile editor tracks for every input —
-     * current (the editor value), saved (the profile file) and applied (the
-     * init-loaded baseline the node runs with; all three identical at
+     * current (the editor value), saved (the profile file or accepted virtual
+     * profile) and applied (the init-loaded baseline; all three identical at
      * initialization) — and the derivation's SSOT is the headless
      * {@link ProfileValueState} (2×2 matrix over saved/applied agreement).
      */
@@ -3925,6 +4604,60 @@ public class NodeConfigurationPanel extends JPanel {
         return ValueStatus.fromState(ProfileValueState.resolve(isCheckbox, value, saved, applied));
     }
 
+    private static ValueStatus propertyValueStatus(Prop<?> prop, String value, String saved, String applied) {
+        if (!Props.NODE_DEBUG_TRACE_SEPARATOR.getName().equals(prop.getName())) {
+            return valueStatus(false, value, saved, applied);
+        }
+        boolean matchesSaved = Objects.equals(value, saved);
+        boolean matchesApplied = Objects.equals(value, applied);
+        if (matchesSaved && matchesApplied) {
+            return ValueStatus.SAVED_APPLIED;
+        }
+        if (matchesSaved) {
+            return ValueStatus.SAVED;
+        }
+        if (matchesApplied) {
+            return ValueStatus.UNSAVED_APPLIED;
+        }
+        return ValueStatus.UNSAVED;
+    }
+
+    private static List<String> propertyDropdownBaselines(Prop<?> prop, String current,
+            String saved, String applied) {
+        if (!Props.NODE_DEBUG_TRACE_SEPARATOR.getName().equals(prop.getName())) {
+            return ProfileValueState.dropdownBaselines(false, current, saved, applied);
+        }
+        return switch (propertyValueStatus(prop, current, saved, applied)) {
+            case SAVED -> List.of(saved, applied).stream().distinct().toList();
+            case UNSAVED_APPLIED -> List.of(saved);
+            case UNSAVED -> List.of(saved, applied).stream().distinct().toList();
+            case SAVED_APPLIED -> List.of();
+        };
+    }
+
+    private static ValueStatus propertyItemStatus(Prop<?> prop, String item, String current,
+            String saved, String applied) {
+        if (!Props.NODE_DEBUG_TRACE_SEPARATOR.getName().equals(prop.getName())) {
+            return ValueStatus.fromState(ProfileValueState.itemState(false, item,
+                    ProfileValueState.resolve(false, current, saved, applied), current, saved, applied));
+        }
+        if (item.equals(current)) {
+            return propertyValueStatus(prop, current, saved, applied);
+        }
+        boolean matchesSaved = item.equals(saved);
+        boolean matchesApplied = item.equals(applied);
+        if (matchesSaved && matchesApplied) {
+            return ValueStatus.SAVED_APPLIED;
+        }
+        if (matchesSaved) {
+            return ValueStatus.SAVED;
+        }
+        if (matchesApplied) {
+            return ValueStatus.UNSAVED_APPLIED;
+        }
+        return ValueStatus.UNSAVED;
+    }
+
     /**
      * The display state of one select dropdown item for the value coloring:
      * every item displays the state of its OWN value — the item equal to the
@@ -3970,9 +4703,20 @@ public class NodeConfigurationPanel extends JPanel {
             return false;
         }
         JdbcConfigurationPanel.JdbcState current = p.getState();
-        JdbcConfigurationPanel.JdbcState saved = savedJdbcState();
+        JdbcConfigurationPanel.JdbcState saved = editingJdbcState();
         return !current.url().equals(saved.url()) || !current.username().equals(saved.username())
                 || !current.password().equals(saved.password());
+    }
+
+    /**
+     * The accepted editor/session JDBC tuple, used to detect edits within the
+     * current Advanced Settings session rather than the profile-file baseline.
+     */
+    private JdbcConfigurationPanel.JdbcState editingJdbcState() {
+        return new JdbcConfigurationPanel.JdbcState(editorLinkedDb,
+                editorProfile.getProperty(Props.DB_URL.getName(), getSafeDefault(Props.DB_URL)),
+                editorProfile.getProperty(Props.DB_USERNAME.getName(), getSafeDefault(Props.DB_USERNAME)),
+                editorProfile.getProperty(Props.DB_PASSWORD.getName(), getSafeDefault(Props.DB_PASSWORD)));
     }
 
     /**
@@ -4052,7 +4796,8 @@ public class NodeConfigurationPanel extends JPanel {
                 // State-aware editable select: the CURRENT value is the editor
                 // text (typed or picked), not the selected model item.
                 value = stateAwareCombos.containsKey(comboBox)
-                        ? stateAwareComboText((JComboBox<String>) comboBox)
+                        ? ConfigurationUtils.propertyValueFromEditing(
+                                propertyComboText(row.prop, (JComboBox<String>) comboBox))
                         : String.valueOf(comboBox.getSelectedItem());
             } else {
                 Object item = comboBox.getSelectedItem();
@@ -4067,9 +4812,11 @@ public class NodeConfigurationPanel extends JPanel {
             savedValue = "";
         if (applied == null)
             applied = "";
-        savedValue = savedValue.trim();
-        applied = applied.trim();
-        return valueStatus(comp instanceof JCheckBox, value, savedValue, applied);
+        if (!Props.NODE_DEBUG_TRACE_SEPARATOR.getName().equals(key)) {
+            savedValue = savedValue.trim();
+            applied = applied.trim();
+        }
+        return propertyValueStatus(row.prop, value, savedValue, applied);
     }
 
     /** @return true when the row's value state is still selected by its search-panel checkbox */
@@ -4118,19 +4865,26 @@ public class NodeConfigurationPanel extends JPanel {
             savedValue = "";
         if (applied == null)
             applied = "";
-        savedValue = savedValue.trim();
-        applied = applied.trim();
+        if (!Props.NODE_DEBUG_TRACE_SEPARATOR.getName().equals(propName)) {
+            savedValue = savedValue.trim();
+            applied = applied.trim();
+        }
 
         if (comp instanceof JCheckBox) {
             value = String.valueOf(((JCheckBox) comp).isSelected());
         } else if (comp instanceof JComboBox) {
             JComboBox<?> comboBox = (JComboBox<?>) comp;
-            if (comboBox.isEditable()) {
+            // During an L&F update (updateUI) the editor is briefly NULL — guard it so
+            // this cannot NPE; with no editor, `target` stays the combo itself and the
+            // value falls back to the selected item.
+            if (comboBox.isEditable() && comboBox.getEditor() != null) {
                 // State-aware editable select: the CURRENT value is the editor
                 // text (typed or picked), not the selected model item.
                 target = (JComponent) comboBox.getEditor().getEditorComponent();
                 value = stateAwareCombos.containsKey(comboBox)
-                        ? stateAwareComboText((JComboBox<String>) comboBox)
+                        ? ConfigurationUtils.propertyValueFromEditing(
+                                propertyComboText(stateAwareCombos.get(comboBox).prop(),
+                                        (JComboBox<String>) comboBox))
                         : String.valueOf(comboBox.getSelectedItem());
             } else {
                 Object item = comboBox.getSelectedItem();
@@ -4138,11 +4892,22 @@ public class NodeConfigurationPanel extends JPanel {
             }
         } else if (target instanceof javax.swing.text.JTextComponent) {
             value = ((javax.swing.text.JTextComponent) target).getText().trim();
-            savedValue = savedValue.trim();
-            applied = applied.trim();
+            if (!Props.NODE_DEBUG_TRACE_SEPARATOR.getName().equals(propName)) {
+                savedValue = savedValue.trim();
+                applied = applied.trim();
+            }
         }
 
-        ValueStatus status = valueStatus(comp instanceof JCheckBox, value, savedValue, applied);
+        Prop<?> prop = stateAwareCombos.containsKey(comp)
+                ? stateAwareCombos.get(comp).prop()
+                : allPropertyRows.stream()
+                        .filter(row -> row.prop != null && propName.equals(row.prop.getName()))
+                        .map(row -> row.prop)
+                        .findFirst()
+                        .orElse(null);
+        ValueStatus status = prop == null
+                ? valueStatus(comp instanceof JCheckBox, value, savedValue, applied)
+                : propertyValueStatus(prop, value, savedValue, applied);
         Color color = status.color();
         String tooltip = status.tooltip();
         // The state-aware select's dropdown follows the state: rebuild its
@@ -4217,49 +4982,81 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private void showColorLegendHelp() {
+        String savedSource = wizardMode ? "accepted virtual profile" : "profile file";
+        String appliedSource = wizardMode ? "original profile baseline" : "baseline this node runs with";
+        String unsavedAppliedDescription = wizardMode
+                ? "These values differ from the accepted virtual profile but match the original profile baseline."
+                : "These values differ from the profile file but match exactly the applied baseline — the running "
+                        + "node already uses them, they are only missing from the saved file.";
+        String savedDescription = wizardMode
+                ? "These values are accepted in the virtual profile but differ from the original profile baseline."
+                : "These values are saved in the currently loaded profile on disk, but they differ from the applied "
+                        + "baseline — saved, but not yet applied (a restart or apply is needed to take effect).";
+        String savedAppliedDescription = wizardMode
+                ? "These values are accepted in the virtual profile and match the original profile baseline."
+                : "These values are saved in the profile file AND match exactly the applied baseline — this node "
+                        + "already runs with them.";
         String msg = "<html><body style='width: 350px'>" +
                 "<h3>Color Coding Legend</h3>" +
                 "<p>The configuration values are color-coded to indicate their current status. Each value is compared " +
-                "against the profile file (SAVED) and the baseline this node runs with (APPLIED):</p>" +
+                "against the " + savedSource + " (SAVED) and the " + appliedSource + " (APPLIED):</p>" +
                 "<ul>" +
                 "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getUnsaved())
                 + "'>\u25A0 Unsaved Values:</font></b> " +
-                "These values differ from BOTH the profile file and the applied baseline — they are new, " +
+                "These values differ from BOTH the " + savedSource + " and the applied baseline — they are new, " +
                 "not-yet-saved changes. Properties with unsaved changes are marked with an asterisk (*).</li>" +
                 "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getUnsavedApplied())
                 + "'>\u25A0 Unsaved and Applied Values:</font></b> " +
-                "These values differ from the profile file but match exactly the applied baseline — the running " +
-                "node already uses them, they are only missing from the saved file.</li>" +
+                unsavedAppliedDescription + "</li>" +
                 "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getSaved())
                 + "'>\u25A0 Saved Values:</font></b> " +
-                "These values are saved in the currently loaded profile on disk, but they differ from the applied " +
-                "baseline — saved, but not yet applied (a restart or apply is needed to take effect).</li>" +
+                savedDescription + "</li>" +
                 "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getApplied())
                 + "'>\u25A0 Saved and Applied Values:</font></b> " +
-                "These values are saved in the profile file AND match exactly the applied baseline — this node " +
-                "already runs with them.</li>" +
+                savedAppliedDescription + "</li>" +
                 "</ul>" +
                 "</body></html>";
         JOptionPane.showMessageDialog(this, msg, "Color Legend", JOptionPane.INFORMATION_MESSAGE);
     }
 
     private void showHelp(Prop<?> prop, String labelText) {
-        String description = helpTexts.getOrDefault(prop.getName(), "No detailed description available.");
+        showPropertyInfo(this, prop, labelText);
+    }
+
+    /**
+     * Shows the same property-information dialog used by the profile editor.
+     * Also used by the setup wizard so its rows share the editor's help text
+     * source instead of maintaining a second set of descriptions.
+     */
+    public static void showPropertyInfo(Component parent, Prop<?> prop, String labelText) {
+        showPropertyInfo(parent, prop.getName(), prop.getDefaultValue(), labelText);
+    }
+
+    public static void showPropertyInfo(Component parent, String propertyName, Object defaultValue,
+            String labelText) {
+        initHelpTexts();
+        String description = helpTexts.getOrDefault(propertyName, "No detailed description available.");
         String message = "<html><body style='width: 300px'>" +
                 "<h2>" + labelText + "</h2>" +
-                "<p><b>Property Key:</b> " + prop.getName() + "</p>" +
-                "<p><b>Default Value:</b> " + prop.getDefaultValue() + "</p>" +
+                "<p><b>Property Key:</b> " + propertyName + "</p>" +
+                "<p><b>Default Value:</b> " + defaultValue + "</p>" +
                 "<hr>" +
                 "<p>" + description.replace("\n", "<br>") + "</p>" +
                 "</body></html>";
 
-        JOptionPane.showMessageDialog(this, message, "Property Information", JOptionPane.INFORMATION_MESSAGE);
+        JOptionPane.showMessageDialog(parent, message, "Property Information", JOptionPane.INFORMATION_MESSAGE);
     }
 
     private void performSave() {
         if ("node-default".equals(loadedProfileName))
             return;
 
+        JdbcConfigurationPanel jdbc = jdbcPanel();
+        if (jdbc != null && jdbc.getValidationError() != null) {
+            JOptionPane.showMessageDialog(this, jdbc.getValidationError(), "Invalid Database File",
+                    JOptionPane.ERROR_MESSAGE);
+            return;
+        }
         Properties propsToSave = getPropertiesFromUI();
         Path targetFile = ConfigurationUtils.resolveNodeProfilePath(loadedProfileName);
 
@@ -4267,6 +5064,7 @@ public class NodeConfigurationPanel extends JPanel {
             ConfigurationUtils.savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());
             // After saving, update savedProfile to reflect the new saved state
             savedProfile.setProperties(propsToSave);
+            editorProfile.setProperties(copyProperties(propsToSave));
             updateDirtyStatus();
             refreshUIColors();
         } catch (Exception e) {
@@ -4337,7 +5135,10 @@ public class NodeConfigurationPanel extends JPanel {
         return String.join(isCommaListProperty(propName) ? "," : ";", listItems(value));
     }
 
-    private void initHelpTexts() {
+    private static synchronized void initHelpTexts() {
+        if (helpTextsInitialized) {
+            return;
+        }
         // API
         helpTexts.put(Props.API_SERVER.getName(),
                 "Enables the HTTP API server. Required for wallets and local tools to communicate with the node.");
@@ -4347,7 +5148,8 @@ public class NodeConfigurationPanel extends JPanel {
                         + "<br>Ensure this port is not blocked by firewalls if you intend to access the node from other devices.");
 
         helpTexts.put(Props.API_LISTEN.getName(),
-                "The interface IP or hostname to bind to."
+                "The API listener binds to a single interface IP address or hostname; "
+                        + "multiple interfaces are not supported."
                         + "<br><br><b>Examples:</b>"
                         + "<ul>"
                         + "<li>0.0.0.0: Listen on all IPv4 interfaces.</li>"
@@ -4508,7 +5310,15 @@ public class NodeConfigurationPanel extends JPanel {
                 "The JDBC connection URL. Examples:"
                         + "<br>SQLite: jdbc:sqlite:file:../database/SQLite/sqlite/signum.sqlite.db"
                         + "<br>MariaDB: jdbc:mariadb://localhost:3306/signum"
-                        + "<br>Postgres: jdbc:postgresql://localhost:5432/signum");
+                        + "<br>Postgres: jdbc:postgresql://localhost:5432/signum"
+                        + "<br><br><b>Linked Database Profile:</b> the node reuses an"
+                        + "<br><b>existing</b> database profile (the Profile select lists database"
+                        + "<br>profiles that already exist only). Create a new database profile with"
+                        + "<br>the <b>+</b> button (the engine's database-profile wizard, prefilled"
+                        + "<br>with this node profile's name) and it is linked automatically; without"
+                        + "<br>a single existing profile the linked mode cannot be selected."
+                        + "<br><b>Custom db.URL:</b> the node keeps its own (dedicated) database URL /"
+                        + "<br>connection settings.");
 
         helpTexts.put(Props.DB_USERNAME.getName(),
                 "The username for the database connection. Required for MariaDB and PostgreSQL.");
@@ -4582,7 +5392,8 @@ public class NodeConfigurationPanel extends JPanel {
                         + "<br>This port must be open and forwarded to allow other peers to connect to your node.");
 
         helpTexts.put(Props.P2P_LISTEN.getName(),
-                "The interface IP or hostname for P2P communication."
+                "The P2P listener binds to a single interface IP address or hostname; "
+                        + "multiple interfaces are not supported."
                         + "<br><br><b>Examples:</b>"
                         + "<ul>"
                         + "<li>0.0.0.0: Listen on all IPv4 interfaces.</li>"
@@ -5083,6 +5894,7 @@ public class NodeConfigurationPanel extends JPanel {
 
         helpTexts.put(Props.DEV_NEXT_FORK_BLOCK_HEIGHT.getName(),
                 "The block height for the next development fork." + networkWarning);
+        helpTextsInitialized = true;
     }
 
     static class PropertyRow {
@@ -5106,6 +5918,9 @@ public class NodeConfigurationPanel extends JPanel {
         JButton help;
         String helpConstraints;
 
+        JComponent validation;
+        String validationConstraints;
+
         JSeparator separator;
         String separatorConstraints;
 
@@ -5115,6 +5930,7 @@ public class NodeConfigurationPanel extends JPanel {
         int inputIndex = -1;
         int extraIndex = -1;
         int helpIndex = -1;
+        int validationIndex = -1;
         int separatorIndex = -1;
 
         PropertyRow(Prop<?> prop, String labelText, JPanel originalParent, int tabIndex) {
@@ -5212,10 +6028,9 @@ public class NodeConfigurationPanel extends JPanel {
             // so the measured width is exactly the glyphs' own width (the
             // icon column stays as narrow as the icons are).
             JButton trashProto = new FlatIconButton();
-            trashProto.setIcon(IconFontSwing.buildIcon(FontAwesome.TRASH,
+            trashProto.setIcon(IconFontCache.buildIcon(FontAwesome.TRASH,
                     GuiConstants.getHelpIconSize(), GuiColors.getContrastRed()));
             FlatPlusButton plusProto = new FlatPlusButton();
-            plusProto.setIcon(rowPlusIcon());
             iconColumnWidth = Math.max(trashProto.getPreferredSize().width,
                     Math.max(plusProto.getPreferredSize().width, helpBtn.getPreferredSize().width));
             int actionColumnWidth = iconColumnWidth + ConfigurationUtils.INPUT_ACTION_GAP;
@@ -5253,7 +6068,6 @@ public class NodeConfigurationPanel extends JPanel {
             addField.setToolTipText("Type an item, then press '+' (or Enter) to add it");
 
             addButton = new FlatPlusButton();
-            addButton.setIcon(rowPlusIcon());
             addButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
             addButton.setToolTipText("Add item");
 
@@ -5309,6 +6123,16 @@ public class NodeConfigurationPanel extends JPanel {
             String value = raw == null ? "" : raw.trim();
             if (value.isEmpty()) {
                 return;
+            }
+            // Prevent duplicates: if the value already exists in the list, don't add it again.
+            for (JComboBox<String> existing : itemFields) {
+                if (value.equals(stateAwareComboText(existing))) {
+                    JOptionPane.showMessageDialog(this,
+                            "Item \"" + value + "\" already exists in the list.",
+                            "Duplicate Item", JOptionPane.WARNING_MESSAGE);
+                    addField.getEditor().setItem("");
+                    return;
+                }
             }
             isProgrammaticChange = true;
             try {
@@ -5541,17 +6365,18 @@ public class NodeConfigurationPanel extends JPanel {
                     // reconfigures the editor on every model change (would
                     // overwrite the text).
                     String typed = addField.getEditor().getItem() instanceof String s ? s : "";
-                    if (!typed.isEmpty()) {
-                        addField.setSelectedItem(typed);
-                    } else {
-                        addField.setSelectedIndex(-1);
-                    }
                     addField.setModel(new DefaultComboBoxModel<>(items.toArray(new String[0])));
                     // The model swap makes the L&F reconfigure the editor to
                     // the new model's first entry (a model change selects
                     // index 0) — restore the typed text the swap clobbered.
-                    if (!typed.equals(stateAwareComboText(addField))) {
-                        addField.getEditor().setItem(typed);
+                    // If the typed text was empty, ensure the field stays
+                    // empty and no item is selected (the add field should
+                    // start clean, not pre-filled with the first entry).
+                    if (!typed.isEmpty()) {
+                        addField.setSelectedItem(typed);
+                    } else {
+                        addField.setSelectedIndex(-1);
+                        addField.getEditor().setItem("");
                     }
                 } finally {
                     isProgrammaticChange = prevFlag;
@@ -5918,7 +6743,7 @@ public class NodeConfigurationPanel extends JPanel {
 
         /** The eye's revealed / hidden face (icon + tooltip). */
         private static void applyRevealEyeState(JLabel eye, boolean revealed) {
-            eye.setIcon(IconFontSwing.buildIcon(
+            eye.setIcon(IconFontCache.buildIcon(
                     revealed ? FontAwesome.EYE_SLASH : FontAwesome.EYE,
                     GuiConstants.getHelpIconSize(), GuiColors.getHelpIcon()));
             eye.setToolTipText(revealed ? "Hide password" : "Show password");
@@ -6036,19 +6861,10 @@ public class NodeConfigurationPanel extends JPanel {
             itemsPanel.repaint();
         }
 
-        /**
-         * The rows' "+" glyph: the SAME size as the rows' trash glyph
-         * ({@code GuiConstants#getHelpIconSize()}, font-relative), so every
-         * row icon of every list editor carries the same size and weight.
-         */
-        private PlusGlyphIcon rowPlusIcon() {
-            return new PlusGlyphIcon(Math.round(GuiConstants.getHelpIconSize()));
-        }
-
         private void addItemRow(JComboBox<String> combo, boolean firstRow) {
             itemsPanel.add(combo, "growx");
             FlatIconButton removeBtn = new FlatIconButton();
-            removeBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.TRASH,
+            removeBtn.setIcon(IconFontCache.buildIcon(FontAwesome.TRASH,
                     GuiConstants.getHelpIconSize(), GuiColors.getContrastRed()));
             removeBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
             removeBtn.setToolTipText("Remove this item");

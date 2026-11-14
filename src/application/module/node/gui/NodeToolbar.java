@@ -42,8 +42,6 @@ import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import net.miginfocom.swing.MigLayout;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import application.module.node.NodeModule;
 
 /**
@@ -63,7 +61,19 @@ import application.module.node.NodeModule;
 @SuppressWarnings("serial")
 public class NodeToolbar extends JPanel {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(NodeToolbar.class);
+    /**
+     * F5 (node.gui hybrid routing, Q7/D7): this per-node view component logs on the
+     * owned node's isolated {@code NodeLoggers} (node context) once a {@link Signum} is
+     * attached; otherwise (late binding / headless) it falls back to the class-based
+     * (global) logger. The node-context &rarr; System Console forward path is unchanged.
+     */
+    private org.apache.logging.log4j.Logger nodeContextLogger() {
+        Signum s = this.signum;
+        if (s != null) {
+            return s.loggers().forClass(NodeToolbar.class);
+        }
+        return org.apache.logging.log4j.LogManager.getLogger(NodeToolbar.class);
+    }
 
     /**
      * P8/F4: routes node-relevant toolbar messages to the profile's own
@@ -202,7 +212,7 @@ public class NodeToolbar extends JPanel {
         try {
             IconFontSwing.register(FontAwesome.getIconFont());
         } catch (Exception e) {
-            LOGGER.debug("FontAwesome already registered or registration failed", e);
+            nodeContextLogger().debug("FontAwesome already registered or registration failed", e);
         }
 
         // Outer layout matches ConsolePanel toolBar: MigLayout with left scroll + right icons
@@ -299,7 +309,7 @@ public class NodeToolbar extends JPanel {
      * Sets both the normal and the hover (rollover) icons of an icon button.
      * <p>
      * The hover effect <b>grows</b> the glyph by {@link HoverScaleIcon#DEFAULT_SCALE}
-     * (15%) rather than recoloring it, with no layout shift: the normal and the
+     * (~40%) rather than recoloring it, with no layout shift: the normal and the
      * rollover icon both expose the SAME (larger) bounding box, so the JButton is
      * sized once (to that box) and never resizes when the hover glyph is swapped
      * in — the glyph simply scales up inside a constant area, so nothing below the
@@ -684,7 +694,7 @@ public class NodeToolbar extends JPanel {
         // path that reaches here before the EDT processed the disable (fast
         // double-click), so a duplicate start can never be queued.
         if (NodeModule.getInstance().isStartPending(profile.getName())) {
-            LOGGER.info("Start already pending for profile: {} — ignoring toggle click", profile.getName());
+            nodeContextLogger().info("Start already pending for profile: {} — ignoring toggle click", profile.getName());
             return;
         }
         Signum signum = NodeModule.getInstance().get(profile.getName());
@@ -942,7 +952,7 @@ public class NodeToolbar extends JPanel {
         try {
             return s.getBlockchainProcessor();
         } catch (Exception e) {
-            LOGGER.debug("Signum facade not ready; maintenance state listeners not attached", e);
+            nodeContextLogger().debug("Signum facade not ready; maintenance state listeners not attached", e);
             return null;
         }
     }
@@ -961,7 +971,7 @@ public class NodeToolbar extends JPanel {
         bp.addPruneListener(pruneStateListener, BlockchainProcessor.Event.PRUNE_END);
         bp.addListener(block -> updateDbCheckIconColor(), BlockchainProcessor.Event.DATABASE_CONSISTENCY_UPDATE);
         consistencyListenerAttached = true;
-        LOGGER.debug("Maintenance state listeners attached for profile: {}", profile.getName());
+        nodeContextLogger().debug("Maintenance state listeners attached for profile: {}", profile.getName());
     }
 
     private void detachMaintenanceStateListeners(Signum s) {

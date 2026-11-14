@@ -17,7 +17,7 @@ import application.utils.gui.HelpButton;
 import application.utils.gui.HelpDialog;
 import application.utils.gui.IconFontCache;
 import application.utils.gui.NewProfileChoiceDialog;
-import application.utils.gui.PlusGlyphIcon;
+import application.utils.gui.ProfileActionIcon;
 import application.utils.gui.ProfileCopyDialog;
 import application.utils.gui.ResponsiveToolbarScrollPane;
 import application.utils.gui.SearchMatchLabel;
@@ -293,6 +293,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
     private JButton toolbarCloneButton;
     private JButton toolbarRenameButton;
     private JButton toolbarCopyButton;
+    private JButton resetToDefaultBtn;
     private JButton toolbarRefreshButton;
     private JButton toolbarDeleteButton;
 
@@ -633,13 +634,13 @@ public class ModuleLoggingProfilePanel extends JPanel {
 
     /** @return true when the given profile entry is the one currently applied for this module. */
     private boolean isAppliedProfile(String name) {
-        if (DEFAULT_PROFILE_ENTRY.equals(name)) {
+        if (name == null || DEFAULT_PROFILE_ENTRY.equals(name)) {
             // A default marker (missing/blank, canonical "default" or the legacy
             // "logging-default") means the built-in Default is applied: all
             // these marker values are equivalent.
             return ReservedNames.isDefaultMarker(appliedProfileName);
         }
-        return name != null && name.equals(appliedProfileName);
+        return name.equals(appliedProfileName);
     }
 
     private JComponent buildLevelEditor() {
@@ -778,7 +779,6 @@ public class ModuleLoggingProfilePanel extends JPanel {
         keyLevelTypeBox.addActionListener(e -> showKeyValueEditor(keyLevelTypeBox.isSelected()));
 
         addKeyButton = new FlatPlusButton();
-        addKeyButton.setIcon(new PlusGlyphIcon(Math.round(GuiConstants.getHelpIconSize())));
         addKeyButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         addKeyButton.setToolTipText("Add key");
         addKeyButton.addActionListener(e -> addKeyFromRow());
@@ -860,7 +860,6 @@ public class ModuleLoggingProfilePanel extends JPanel {
             protoTrash.setIcon(IconFontCache.buildIcon(FontAwesome.TRASH,
                     GuiConstants.getHelpIconSize(), GuiColors.getContrastRed()));
             FlatPlusButton protoPlus = new FlatPlusButton();
-            protoPlus.setIcon(new PlusGlyphIcon(Math.round(GuiConstants.getHelpIconSize())));
             actionColumnWidth = Math.max(protoTrash.getPreferredSize().width,
                     protoPlus.getPreferredSize().width);
         }
@@ -970,11 +969,11 @@ public class ModuleLoggingProfilePanel extends JPanel {
         rowInitValues.clear();
         rowAppliedValues.clear();
         String selected = selectedProfileName();
-        boolean selectedIsDefault = DEFAULT_PROFILE_ENTRY.equals(selected);
-        // The virtual "Default" entry IS the reserved built-in profile: its
-        // saved (and init) content is the on-disk default file (the runtime
-        // truth an unassigned owner starts with) — a key the file does not
-        // define falls back to the built-in row default below.
+        boolean selectedIsDefault = selected == null || DEFAULT_PROFILE_ENTRY.equals(selected);
+        // When no profile is selected (or the reserved "Default" name is
+        // selected), the saved (and init) content is the on-disk default file
+        // (the runtime truth an unassigned owner starts with) — a key the
+        // file does not define falls back to the built-in row default below.
         Properties selectedProps = selectedIsDefault
                 ? loadProfilePropsSafely(LoggingProfileRepository.RESERVED_PROFILE_NAME)
                 : loadProfilePropsSafely(selected);
@@ -1761,14 +1760,15 @@ public class ModuleLoggingProfilePanel extends JPanel {
     }
 
     private RowState valueState(String key, String value) {
-        return !DEFAULT_PROFILE_ENTRY.equals(selectedProfileName())
+        String selected = selectedProfileName();
+        return selected == null || DEFAULT_PROFILE_ENTRY.equals(selected)
                 ? RowStateResolver.resolve(value,
                         rowSavedValues.getOrDefault(key, ""),
-                        rowAppliedValues.getOrDefault(key, ""),
-                        rowInitValues.getOrDefault(key, ""))
+                        rowAppliedValues.getOrDefault(key, ""))
                 : RowStateResolver.resolve(value,
                         rowSavedValues.getOrDefault(key, ""),
-                        rowAppliedValues.getOrDefault(key, ""));
+                        rowAppliedValues.getOrDefault(key, ""),
+                        rowInitValues.getOrDefault(key, ""));
     }
 
     /**
@@ -1805,7 +1805,8 @@ public class ModuleLoggingProfilePanel extends JPanel {
         if (!saved.isBlank() && !saved.equals(current)) {
             items.add(saved);
         }
-        if (!DEFAULT_PROFILE_ENTRY.equals(selectedProfileName()) && !init.isBlank() && !init.equals(current)) {
+        String selected = selectedProfileName();
+        if (selected != null && !DEFAULT_PROFILE_ENTRY.equals(selected) && !init.isBlank() && !init.equals(current)) {
             items.add(init);
         }
         if (!applied.isBlank() && !applied.equals(current)) {
@@ -1872,9 +1873,15 @@ public class ModuleLoggingProfilePanel extends JPanel {
         toolbarCopyButton.addActionListener(e -> copyConfiguration());
         panel.add(toolbarCopyButton);
 
+        resetToDefaultBtn = new JButton();
+        resetToDefaultBtn.setToolTipText(ConfigurationUtils.profileTooltip(
+                "Reset to Default<br><br>Copies this module's hardcoded default logging "
+                        + "values into the current editor (unsaved). Press Save to persist."));
+        resetToDefaultBtn.addActionListener(e -> resetToDefaults());
+        panel.add(resetToDefaultBtn);
+
         toolbarRenameButton = new JButton();
-        toolbarRenameButton.setToolTipText(ConfigurationUtils.profileTooltip("Rename Profile<br><br>Changes the name of the selected "
-                + "on-disk logging profile. The built-in Default profile cannot be renamed."));
+        toolbarRenameButton.setToolTipText(ConfigurationUtils.profileTooltip("Rename Profile<br><br>Changes the name of the selected logging profile."));
         toolbarRenameButton.addActionListener(e -> renameProfile());
         panel.add(toolbarRenameButton);
 
@@ -1905,8 +1912,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
         panel.add(toolbarRefreshButton);
 
         toolbarDeleteButton = new JButton();
-        toolbarDeleteButton.setToolTipText(ConfigurationUtils.profileTooltip("Delete<br><br>Permanently deletes the selected on-disk "
-                + "logging profile. The built-in Default profile cannot be deleted."));
+        toolbarDeleteButton.setToolTipText(ConfigurationUtils.profileTooltip("Delete<br><br>Permanently deletes the selected logging profile."));
         toolbarDeleteButton.addActionListener(e -> deleteProfile());
         panel.add(toolbarDeleteButton);
 
@@ -1941,13 +1947,13 @@ public class ModuleLoggingProfilePanel extends JPanel {
 
     private void updateProfileToolbarUI() {
         ConfigurationUtils.configureProfileToolbar(toolbarNewButton, saveButton, applyButton, toolbarRenameButton,
-                toolbarDeleteButton, null, toolbarRefreshButton, null, toolbarCopyButton,
+                toolbarDeleteButton, null, toolbarRefreshButton, resetToDefaultBtn, toolbarCopyButton,
                 toolbarCloneButton);
         float iconSize = GuiConstants.getToolBarIconSize();
         ConfigurationUtils.styleProfileIconButton(saveButton, FontAwesome.FLOPPY_O, GuiColors.getSaved(), iconSize);
         ConfigurationUtils.styleProfileIconButton(applyButton, FontAwesome.CHECK_CIRCLE_O, GuiColors.getApplied(),
                 iconSize);
-        ConfigurationUtils.styleProfileIconButton(toolbarRefreshButton, FontAwesome.UNDO,
+        ConfigurationUtils.styleProfileIconButton(toolbarRefreshButton, FontAwesome.REFRESH,
                 GuiColors.getButtonIcon(), iconSize);
         ConfigurationUtils.styleProfileIconButton(helpButton, FontAwesome.QUESTION_CIRCLE,
                 GuiColors.getButtonIcon(), iconSize);
@@ -1970,12 +1976,11 @@ public class ModuleLoggingProfilePanel extends JPanel {
         // guarded, explicit switch happens afterwards, in the caller).
         isProgrammaticSelection = true;
         try {
-            // The virtual "Default" entry is listed INSTEAD of the reserved
-            // sample config on disk (logging-default): selecting Default uses
-            // the application's built-in values and never touches a profile
-            // file.
+            // The combo lists only file-backed profiles discovered on disk.
+            // The virtual "Default" (L0 built-in values) is no longer a
+            // selectable entry — it remains as the internal baseline for
+            // the init snapshot and the "Reset to Defaults" action.
             profileCombo.removeAllItems();
-            profileCombo.addItem(DEFAULT_PROFILE_ENTRY);
             for (String name : profiles) {
                 profileCombo.addItem(name);
             }
@@ -2045,20 +2050,19 @@ public class ModuleLoggingProfilePanel extends JPanel {
         if (saveButton == null) {
             return; // toolbar not built yet
         }
-        boolean defaultSelected = DEFAULT_PROFILE_ENTRY.equals(profileCombo.getSelectedItem());
-        saveButton.setEnabled(!defaultSelected && hasUnsavedRows());
+        Object selected = profileCombo.getSelectedItem();
+        boolean hasSelection = selected != null;
+        saveButton.setEnabled(hasSelection && hasUnsavedRows());
         // Apply is meaningful when the selected profile is not the applied
         // one (assign it — including the "nothing applied yet" case), when
         // saved changes wait for activation, or when the editor holds unsaved
         // changes — Apply then acts as Save and Apply (the editor content is
         // persisted to the selected profile before it is applied).
-        Object selected = profileCombo.getSelectedItem();
-        boolean selectedIsApplied = !defaultSelected
-                && selected != null
+        boolean selectedIsApplied = hasSelection
                 && selected.toString().equals(appliedProfileName);
-        applyButton.setEnabled(defaultSelected || !selectedIsApplied || hasUnsavedRows() || hasSavedNotAppliedRows());
-        renameButton.setEnabled(!defaultSelected);
-        deleteButton.setEnabled(!defaultSelected);
+        applyButton.setEnabled(!selectedIsApplied || hasUnsavedRows() || hasSavedNotAppliedRows());
+        renameButton.setEnabled(hasSelection);
+        deleteButton.setEnabled(hasSelection);
     }
 
     /**
@@ -2100,10 +2104,9 @@ public class ModuleLoggingProfilePanel extends JPanel {
         // The editor's source: the profile's dirty workspace state (the
         // unsaved edits held while the user worked on another profile) wins
         // over the disk content. The virtual "Default" entry shows the
-        // built-in defaults: its content is the reference-only L0 template
-        // file — the user-editable L1 layer ("default.properties") is a
-        // separate file and is never shown here. A key the template does
-        // not define falls back to the built-in row default below.
+        // built-in L0 template content (reference-only, read from the
+        // template/ subdirectory). A key the template does not define
+        // falls back to the built-in row default below.
         // Nothing is ever written to the template file.
         Properties source;
         if (DEFAULT_PROFILE_ENTRY.equals(name)) {
@@ -2400,12 +2403,8 @@ public class ModuleLoggingProfilePanel extends JPanel {
             }
         }
         String current = (String) profileCombo.getSelectedItem();
-        String sel = ProfileCopyDialog.show(this, profiles, current, DEFAULT_PROFILE_ENTRY);
+        String sel = ProfileCopyDialog.show(this, profiles, current);
         if (sel == null) {
-            return;
-        }
-        if (DEFAULT_PROFILE_ENTRY.equals(sel)) {
-            resetToDefaults();
             return;
         }
         try {
@@ -2444,13 +2443,6 @@ public class ModuleLoggingProfilePanel extends JPanel {
     private void saveCurrentProfile() {
         String name = (String) profileCombo.getSelectedItem();
         if (name == null) {
-            return;
-        }
-        if (DEFAULT_PROFILE_ENTRY.equals(name)) {
-            JOptionPane.showMessageDialog(this,
-                    "The \"Default\" profile is the application's built-in configuration — it cannot be saved.\n"
-                            + "Create or select a named profile to persist your changes.",
-                    "Default profile", JOptionPane.INFORMATION_MESSAGE);
             return;
         }
         try {
@@ -2590,7 +2582,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
      */
     String defaultApplyMessage(String profileName, boolean isDefault) {
         // The user-facing name of the built-in profile is the dropdown entry
-        // ("Default") — not the on-disk L1 file name ("default.properties").
+        // ("Default") — not the on-disk template file name.
         String defaultName = DEFAULT_PROFILE_ENTRY;
         String what = isDefault
                 ? "Resets the module's applied reference to the built-in '" + defaultName + "' profile (its "
@@ -2611,8 +2603,8 @@ public class ModuleLoggingProfilePanel extends JPanel {
 
     private void renameProfile() {
         String oldName = (String) profileCombo.getSelectedItem();
-        if (oldName == null || DEFAULT_PROFILE_ENTRY.equals(oldName)) {
-            JOptionPane.showMessageDialog(this, "The \"Default\" profile cannot be renamed.",
+        if (oldName == null) {
+            JOptionPane.showMessageDialog(this, "No profile selected.",
                     "Error", JOptionPane.ERROR_MESSAGE);
             return;
         }
@@ -2760,7 +2752,8 @@ public class ModuleLoggingProfilePanel extends JPanel {
                         + "the editor value but does not save it."));
         content.add(HelpDialog.separator());
         content.add(HelpDialog.heading("Toolbar actions"));
-        content.add(HelpDialog.actionRow(FontAwesome.FILE_O, iconColor, "New Profile",
+        content.add(HelpDialog.actionRow(ProfileActionIcon.NEW_PROFILE.normal(GuiConstants.getButtonIconSize()),
+                "New Profile",
                 "Creates a new logging profile initialized with this module's default logger settings."));
         content.add(HelpDialog.actionRow(FontAwesome.FLOPPY_O, GuiColors.getSaved(), "Save",
                 "Saves the current editor state to the selected profile. "
@@ -2773,16 +2766,15 @@ public class ModuleLoggingProfilePanel extends JPanel {
                         + "saved, not yet applied changes. Apply does not save unsaved editor changes."));
         content.add(HelpDialog.actionRow(FontAwesome.PENCIL_SQUARE_O, iconColor, "Rename",
                 "Renames the selected on-disk profile. The built-in Default entry cannot be renamed."));
-        content.add(HelpDialog.actionRow(FontAwesome.REFRESH, iconColor, "Reset to Defaults",
-                "In the Copy Configuration dialog: replaces every editor value with this module's default "
-                        + "(select the \"Default\" entry or press Reset to Defaults). The changes remain "
-                        + "unsaved until Save."));
+        content.add(HelpDialog.actionRow(FontAwesome.UNDO, iconColor, "Reset to Defaults",
+                "Copies this module's hardcoded default logging values into the current editor "
+                        + "(unsaved). Press Save to persist the reset values to this profile."));
         content.add(HelpDialog.actionRow(FontAwesome.CLIPBOARD, iconColor, "Copy Configuration",
                 "Copies another profile's values into this editor as unsaved changes; current unsaved edits "
                         + "are discarded."));
         content.add(HelpDialog.actionRow(FontAwesome.FILES_O, iconColor, "Clone Configuration",
                 "Creates a new profile from the current (unsaved, editor) effective state."));
-        content.add(HelpDialog.actionRow(FontAwesome.UNDO, iconColor, "Refresh",
+        content.add(HelpDialog.actionRow(FontAwesome.REFRESH, iconColor, "Refresh",
                 "Re-scans the profiles on disk and re-reads the selected profile (discards unsaved edits)."));
         content.add(HelpDialog.actionRow(FontAwesome.TRASH_O, GuiColors.getContrastRed(), "Delete",
                 "Permanently deletes the selected on-disk profile. The built-in Default entry cannot be deleted."));

@@ -1,8 +1,10 @@
 package application.module.appearance.gui;
 
 import application.module.node.props.Props;
+import application.module.appearance.AppearanceDefaults;
 import application.module.appearance.AppearanceModule;
 import application.module.appearance.AppearanceProfile;
+import application.module.appearance.AppearanceProfileRepository;
 import application.module.appearance.gui.laf.FlatLafPanel;
 import application.module.node.gui.ColorSettingsPanel;
 import application.utils.gui.ColorPaletteManager;
@@ -24,7 +26,6 @@ import com.formdev.flatlaf.util.LoggingFacade;
 import com.formdev.flatlaf.util.SystemInfo;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import jiconfont.icons.font_awesome.FontAwesome;
@@ -57,6 +58,7 @@ public class AppearancePanel extends JPanel {
     private JButton newProfileBtn;
     private JButton cloneProfileBtn;
     private JButton copyProfileBtn;
+    private JButton resetToDefaultBtn;
     private JButton renameProfileBtn;
     private JButton deleteProfileBtn;
     private ColorSettingsPanel colorSettingsPanel;
@@ -71,6 +73,7 @@ public class AppearancePanel extends JPanel {
     private AppearanceProfile savedProfile;
     private boolean isProgrammaticChange = false;
     private boolean lastUnsavedStatus = false;
+    private final AppearanceProfileRepository profileRepository;
 
     // GPU acceleration checkbox (requires restart to take effect)
     private JCheckBox gpuAccelerationCheckBox;
@@ -89,30 +92,28 @@ public class AppearancePanel extends JPanel {
         super(new BorderLayout());
         this.backAction = backAction;
         instance = this;
+        this.profileRepository = new AppearanceProfileRepository("conf");
+        profileRepository.ensureDirExists();
 
         // Determine initial state from file BEFORE the UI is created
         String lastProfile = DEFAULT_PROFILE_NAME;
-        boolean legacyProfileExists = false;
         try {
             Path settingsPath = getGuiSettingsPath();
             if (Files.exists(settingsPath)) {
                 try (BufferedReader reader = Files.newBufferedReader(settingsPath, StandardCharsets.UTF_8)) {
                     JsonObject settings = JsonParser.parseReader(reader).getAsJsonObject();
                     if (settings.has("lastSelectedLafProfile")) {
-                        lastProfile = settings.get("lastSelectedLafProfile").getAsString();
+                        String candidate = settings.get("lastSelectedLafProfile").getAsString();
+                        if (!LEGACY_DEFAULT_PROFILE_NAME.equals(candidate)
+                                && profileRepository.getProfileDir().resolve(candidate + ".properties").toFile().exists()) {
+                            lastProfile = candidate;
+                        }
                     }
-                    legacyProfileExists = settings.has("lookAndFeelProfiles")
-                            && settings.getAsJsonObject("lookAndFeelProfiles")
-                                    .has(LEGACY_DEFAULT_PROFILE_NAME);
                 }
             }
         } catch (Exception e) {
             LOGGER.warn("Failed to read the last selected appearance profile; using '{}'",
                     DEFAULT_PROFILE_NAME, e);
-        }
-        if (LEGACY_DEFAULT_PROFILE_NAME.equals(lastProfile)
-                && !legacyProfileExists) {
-            lastProfile = DEFAULT_PROFILE_NAME;
         }
         updateLoadedStateFromProfile(lastProfile);
 
@@ -146,7 +147,7 @@ public class AppearancePanel extends JPanel {
 
         newProfileBtn = new JButton();
         newProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip("New Profile<br><br>"
-                + "Creates and selects a new appearance profile initialized with the built-in Default appearance."));
+                + "Creates a new appearance profile initialized with the application default appearance."));
         newProfileBtn.addActionListener(e -> createNewProfile());
         profilePanel.add(newProfileBtn);
 
@@ -164,16 +165,22 @@ public class AppearancePanel extends JPanel {
         copyProfileBtn.addActionListener(e -> copyProfile());
         profilePanel.add(copyProfileBtn);
 
+        resetToDefaultBtn = new JButton();
+        resetToDefaultBtn.setToolTipText(ConfigurationUtils.profileTooltip(
+                "Reset to Default<br><br>Copies the application's default appearance "
+                        + "values into the current editor (unsaved). Press Save to persist."));
+        resetToDefaultBtn.addActionListener(e -> resetToDefault());
+        profilePanel.add(resetToDefaultBtn);
+
         renameProfileBtn = new JButton();
         renameProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip("Rename Profile<br><br>"
-                + "Renames the selected custom profile. The built-in Default profile cannot be renamed."));
+                + "Renames the selected profile."));
         renameProfileBtn.addActionListener(e -> renameProfile((String) profileComboBox.getSelectedItem()));
         profilePanel.add(renameProfileBtn);
 
         saveProfileBtn = new JButton();
         saveProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip("Save Profile<br><br>"
-                + "Saves the current appearance to the selected custom profile. "
-                + "The built-in Default profile cannot be overwritten."));
+                + "Saves the current appearance to the selected profile."));
         saveProfileBtn.addActionListener(e -> saveCurrentProfile());
         profilePanel.add(saveProfileBtn);
 
@@ -186,8 +193,7 @@ public class AppearancePanel extends JPanel {
 
         deleteProfileBtn = new JButton();
         deleteProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip("Delete Profile<br><br>"
-                + "Permanently deletes the selected custom profile. "
-                + "The built-in Default profile cannot be deleted."));
+                + "Permanently deletes the selected profile."));
         deleteProfileBtn.addActionListener(e -> deleteProfile((String) profileComboBox.getSelectedItem()));
         profilePanel.add(deleteProfileBtn);
 
@@ -274,11 +280,10 @@ public class AppearancePanel extends JPanel {
         if (profileComboBox == null || renameProfileBtn == null || deleteProfileBtn == null || saveProfileBtn == null) {
             return;
         }
-        String selected = (String) profileComboBox.getSelectedItem();
-        boolean isDefault = DEFAULT_PROFILE_NAME.equals(selected);
-        renameProfileBtn.setEnabled(!isDefault);
-        deleteProfileBtn.setEnabled(!isDefault);
-        saveProfileBtn.setEnabled(!isDefault && hasUnsavedChanges());
+        boolean hasSelection = profileComboBox.getSelectedItem() != null;
+        renameProfileBtn.setEnabled(hasSelection);
+        deleteProfileBtn.setEnabled(hasSelection);
+        saveProfileBtn.setEnabled(hasSelection && hasUnsavedChanges());
     }
 
     private boolean hasUnsavedChanges() {
@@ -302,9 +307,8 @@ public class AppearancePanel extends JPanel {
             return;
         boolean dirty = hasUnsavedChanges();
         saveProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip("Save Profile" + (dirty ? " *" : "")
-                + "<br><br>Saves the current appearance to the selected custom profile. "
-                + "The built-in Default profile cannot be overwritten."));
-        saveProfileBtn.setEnabled(!DEFAULT_PROFILE_NAME.equals(savedProfile.getName()) && dirty);
+                + "<br><br>Saves the current appearance to the selected profile."));
+        saveProfileBtn.setEnabled(dirty);
 
         // Mark tabs with an asterisk if there are unsaved changes
         boolean colorsDirty = colorSettingsPanel != null
@@ -335,11 +339,6 @@ public class AppearancePanel extends JPanel {
             if (name == null || name.trim().isEmpty())
                 return;
             String profileName = name.trim();
-            if (DEFAULT_PROFILE_NAME.equals(profileName)) {
-                JOptionPane.showMessageDialog(this, "The built-in Default profile name is reserved.",
-                        "Invalid Profile Name", JOptionPane.WARNING_MESSAGE);
-                return;
-            }
             if (containsProfile(profileName) || profileExistsInSettings(profileName)) {
                 JOptionPane.showMessageDialog(this, "Profile '" + profileName + "' already exists.",
                         "Profile Already Exists", JOptionPane.WARNING_MESSAGE);
@@ -361,11 +360,6 @@ public class AppearancePanel extends JPanel {
             return;
         }
         name = name.trim();
-        if (DEFAULT_PROFILE_NAME.equals(name)) {
-            JOptionPane.showMessageDialog(this, "The built-in Default profile cannot be overwritten.",
-                    "Action Not Allowed", JOptionPane.WARNING_MESSAGE);
-            return;
-        }
         if (containsProfile(name) || profileExistsInSettings(name)) {
             JOptionPane.showMessageDialog(this, "Profile '" + name + "' already exists.",
                     "Profile Already Exists", JOptionPane.WARNING_MESSAGE);
@@ -382,11 +376,8 @@ public class AppearancePanel extends JPanel {
                 profiles.add(profile);
             }
         }
-        // Both "copy from profile" and the relocated reset-to-defaults action live in
-        // the same modal dialog: a real profile copies its settings, while the virtual
-        // "Default" entry (or the dialog's Reset to Defaults button) resets the appearance.
         String current = (String) profileComboBox.getSelectedItem();
-        String source = ProfileCopyDialog.show(this, profiles, current, DEFAULT_PROFILE_NAME);
+        String source = ProfileCopyDialog.show(this, profiles, current);
         if (source == null) {
             return;
         }
@@ -400,12 +391,7 @@ public class AppearancePanel extends JPanel {
                 return;
             }
         }
-        if (DEFAULT_PROFILE_NAME.equals(source)) {
-            resetToDefault();
-            return;
-        }
-        AppearanceProfile sourceProfile = ConfigurationUtils.loadLookAndFeelProfile(getGuiSettingsPath(),
-                source);
+        AppearanceProfile sourceProfile = profileRepository.loadProfile(source);
         if (sourceProfile == null || !profileExistsInSettings(source)) {
             JOptionPane.showMessageDialog(this, "Failed to load profile '" + source + "'.",
                     "Copy Configuration", JOptionPane.ERROR_MESSAGE);
@@ -512,27 +498,16 @@ public class AppearancePanel extends JPanel {
     }
 
     private boolean profileExistsInSettings(String name) {
-        if (name == null) {
+        if (name == null || name.isBlank()) {
             return false;
         }
-        Path settingsPath = getGuiSettingsPath();
-        if (Files.notExists(settingsPath)) {
-            return false;
-        }
-        try (BufferedReader reader = Files.newBufferedReader(settingsPath, StandardCharsets.UTF_8)) {
-            JsonObject settings = JsonParser.parseReader(reader).getAsJsonObject();
-            return settings.has("lookAndFeelProfiles")
-                    && settings.getAsJsonObject("lookAndFeelProfiles").has(name);
-        } catch (IOException | IllegalStateException e) {
-            LOGGER.warn("Failed to inspect appearance profile '{}'", name, e);
-            return false;
-        }
+        return profileRepository.getProfileDir().resolve(name + ".properties").toFile().exists();
     }
 
     private void updateLoadedStateFromProfile(String profileName) {
         this.savedProfile = DEFAULT_PROFILE_NAME.equals(profileName)
-                ? new AppearanceProfile(DEFAULT_PROFILE_NAME)
-                : ConfigurationUtils.loadLookAndFeelProfile(getGuiSettingsPath(), profileName);
+                ? AppearanceDefaults.createDefaultProfile()
+                : profileRepository.loadProfile(profileName);
         if (this.savedProfile != null && this.savedProfile.getThemeClassName() == null) {
             this.savedProfile.setThemeClassName(FlatDarkLaf.class.getName());
         }
@@ -548,13 +523,6 @@ public class AppearancePanel extends JPanel {
         }
     }
 
-    private Font parseFont(JsonObject fontSettings) {
-        String family = fontSettings.get("family").getAsString();
-        int style = fontSettings.get("style").getAsInt();
-        int size = fontSettings.get("size").getAsInt();
-        return new Font(family, style, size);
-    }
-
     private void updateProfileButtonsUI() {
         if (profileComboBox != null) {
             ConfigurationUtils.fixComponentSize(profileComboBox);
@@ -564,7 +532,7 @@ public class AppearancePanel extends JPanel {
             profileComboBox.repaint();
         }
         ConfigurationUtils.configureProfileToolbar(newProfileBtn, saveProfileBtn, null, renameProfileBtn,
-                deleteProfileBtn, null, reloadProfileBtn, null, copyProfileBtn, cloneProfileBtn);
+                deleteProfileBtn, null, reloadProfileBtn, resetToDefaultBtn, copyProfileBtn, cloneProfileBtn);
         // The toolbar's help icon follows the SAME flat icon-button look as
         // every other toolbar button (the module logging profile toolbar's
         // pattern): the button-icon color, the toolbar icon size, the uniform
@@ -722,29 +690,14 @@ public class AppearancePanel extends JPanel {
     }
 
     private boolean saveProfileInternal(String name, boolean confirmOverwrite) {
-        if (name == null || name.trim().isEmpty() || DEFAULT_PROFILE_NAME.equals(name.trim())) {
-            JOptionPane.showMessageDialog(this, "The built-in Default profile cannot be overwritten.",
+        if (name == null || name.trim().isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Profile name must not be empty.",
                     "Action Not Allowed", JOptionPane.WARNING_MESSAGE);
             return false;
         }
         name = name.trim();
         try {
-            Path settingsPath = getGuiSettingsPath();
-            JsonObject settings;
-            if (Files.exists(settingsPath)) {
-                try (BufferedReader reader = Files.newBufferedReader(settingsPath, StandardCharsets.UTF_8)) {
-                    settings = JsonParser.parseReader(reader).getAsJsonObject();
-                }
-            } else {
-                settings = new JsonObject();
-            }
-
-            if (!settings.has("lookAndFeelProfiles")) {
-                settings.add("lookAndFeelProfiles", new JsonObject());
-            }
-            JsonObject profiles = settings.getAsJsonObject("lookAndFeelProfiles");
-
-            if (confirmOverwrite && profiles.has(name)) {
+            if (confirmOverwrite && profileRepository.getProfileDir().resolve(name + ".properties").toFile().exists()) {
                 int choice = DialogUtils.confirm(this,
                         DialogUtils.actionIcon(FontAwesome.FLOPPY_O, GuiColors.getButtonIcon()),
                         "Override profile settings",
@@ -755,45 +708,20 @@ public class AppearancePanel extends JPanel {
                 }
             }
 
-            JsonObject lafSettings = new JsonObject();
-            String currentTheme = UIManager.getLookAndFeel().getClass().getName();
-            lafSettings.addProperty("theme", currentTheme);
-
-            // Always save font information (global and console)
+            // Build the profile from current UI state
+            AppearanceProfile profileToSave = new AppearanceProfile(name);
+            profileToSave.setThemeClassName(UIManager.getLookAndFeel().getClass().getName());
             Font font = UIManager.getFont("Label.font");
-            JsonObject fontSettings = new JsonObject();
-            fontSettings.addProperty("family", font.getFamily());
-            fontSettings.addProperty("style", font.getStyle());
-            fontSettings.addProperty("size", font.getSize());
-            lafSettings.add("font", fontSettings);
-
+            profileToSave.setGlobalFont(font);
             Font consoleFont = UIManager.getFont("TextArea.font");
-            JsonObject consoleFontSettings = new JsonObject();
-            consoleFontSettings.addProperty("family", consoleFont.getFamily());
-            consoleFontSettings.addProperty("style", consoleFont.getStyle());
-            consoleFontSettings.addProperty("size", consoleFont.getSize());
-            lafSettings.add("consoleFont", consoleFontSettings);
-
+            profileToSave.setConsoleFont(consoleFont);
             Map<String, Color> overrides = colorSettingsPanel.getCurrentOverrides();
-            if (overrides != null && !overrides.isEmpty()) {
-                JsonObject overridesJson = new JsonObject();
-                for (Map.Entry<String, Color> entry : overrides.entrySet()) {
-                    overridesJson.addProperty(entry.getKey(), toHexString(entry.getValue()));
-                }
-                lafSettings.add("colorOverrides", overridesJson);
-            }
+            profileToSave.setColorOverrides(overrides);
 
-            profiles.add(name, lafSettings);
-            settings.addProperty("lastSelectedLafProfile", name);
+            profileRepository.saveProfile(name, profileToSave);
 
-            if (Files.notExists(settingsPath.getParent())) {
-                Files.createDirectories(settingsPath.getParent());
-            }
-
-            try (BufferedWriter writer = Files.newBufferedWriter(settingsPath, StandardCharsets.UTF_8)) {
-                Gson gson = new GsonBuilder().setPrettyPrinting().create();
-                writer.write(gson.toJson(settings));
-            }
+            // Persist lastSelectedLafProfile in gui-settings.json (app-level state)
+            saveLastSelectedProfile(name);
 
             isProgrammaticChange = true;
             try {
@@ -827,22 +755,40 @@ public class AppearancePanel extends JPanel {
         }
     }
 
+    private void saveLastSelectedProfile(String name) {
+        try {
+            Path settingsPath = getGuiSettingsPath();
+            JsonObject settings;
+            if (Files.exists(settingsPath)) {
+                try (BufferedReader reader = Files.newBufferedReader(settingsPath, StandardCharsets.UTF_8)) {
+                    settings = JsonParser.parseReader(reader).getAsJsonObject();
+                }
+            } else {
+                settings = new JsonObject();
+            }
+            settings.addProperty("lastSelectedLafProfile", name);
+            if (Files.notExists(settingsPath.getParent())) {
+                Files.createDirectories(settingsPath.getParent());
+            }
+            try (BufferedWriter writer = Files.newBufferedWriter(settingsPath, StandardCharsets.UTF_8)) {
+                Gson gson = new GsonBuilder().setPrettyPrinting().create();
+                writer.write(gson.toJson(settings));
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Failed to persist lastSelectedLafProfile", e);
+        }
+    }
+
     private void loadProfiles(JComboBox<String> comboBox) {
         try {
-            comboBox.addItem(DEFAULT_PROFILE_NAME);
+            for (String profileName : profileRepository.discoverProfiles()) {
+                comboBox.addItem(profileName);
+            }
+            // Select the last profile from gui-settings.json (app-level state)
             Path settingsPath = getGuiSettingsPath();
             if (Files.exists(settingsPath)) {
                 try (BufferedReader reader = Files.newBufferedReader(settingsPath, StandardCharsets.UTF_8)) {
                     JsonObject settings = JsonParser.parseReader(reader).getAsJsonObject();
-                    if (settings.has("lookAndFeelProfiles")) {
-                        JsonObject profiles = settings.getAsJsonObject("lookAndFeelProfiles");
-                        for (String profileName : profiles.keySet()) {
-                            if (DEFAULT_PROFILE_NAME.equals(profileName)) {
-                                continue;
-                            }
-                            comboBox.addItem(profileName);
-                        }
-                    }
                     if (settings.has("lastSelectedLafProfile")) {
                         String lastSelected = settings.get("lastSelectedLafProfile").getAsString();
                         if (LEGACY_DEFAULT_PROFILE_NAME.equals(lastSelected)
@@ -875,11 +821,6 @@ public class AppearancePanel extends JPanel {
                     JOptionPane.WARNING_MESSAGE);
             return;
         }
-        if (DEFAULT_PROFILE_NAME.equals(oldProfileName)) {
-            JOptionPane.showMessageDialog(this, "The built-in Default profile cannot be renamed.",
-                    "Action Not Allowed", JOptionPane.WARNING_MESSAGE);
-            return;
-        }
 
         String newProfileName = (String) JOptionPane.showInputDialog(
                 this,
@@ -895,66 +836,47 @@ public class AppearancePanel extends JPanel {
             return; // User cancelled or entered the same name
         }
         newProfileName = newProfileName.trim();
-        if (DEFAULT_PROFILE_NAME.equals(newProfileName)) {
-            JOptionPane.showMessageDialog(this, "The built-in Default profile name is reserved.",
-                    "Invalid Profile Name", JOptionPane.WARNING_MESSAGE);
-            return;
-        }
 
         try {
-            Path settingsPath = getGuiSettingsPath();
-            JsonObject settings;
-            if (Files.exists(settingsPath)) {
-                try (BufferedReader reader = Files.newBufferedReader(settingsPath, StandardCharsets.UTF_8)) {
-                    settings = JsonParser.parseReader(reader).getAsJsonObject();
-                }
-            } else {
-                JOptionPane.showMessageDialog(this, "Settings file not found.", "Error", JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-
-            if (!settings.has("lookAndFeelProfiles")) {
-                JOptionPane.showMessageDialog(this, "No profiles found in settings file.", "Error",
-                        JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-
-            JsonObject profiles = settings.getAsJsonObject("lookAndFeelProfiles");
-
-            if (profiles.has(newProfileName)) {
+            if (profileRepository.getProfileDir().resolve(newProfileName + ".properties").toFile().exists()) {
                 JOptionPane.showMessageDialog(this, "A profile with the name '" + newProfileName + "' already exists.",
                         "Error", JOptionPane.ERROR_MESSAGE);
                 return;
             }
-
-            if (profiles.has(oldProfileName)) {
-                JsonElement profileData = profiles.remove(oldProfileName);
-                profiles.add(newProfileName, profileData);
-
-                if (settings.has("lastSelectedLafProfile")
-                        && settings.get("lastSelectedLafProfile").getAsString().equals(oldProfileName)) {
-                    settings.addProperty("lastSelectedLafProfile", newProfileName);
-                }
-
-                try (BufferedWriter writer = Files.newBufferedWriter(settingsPath, StandardCharsets.UTF_8)) {
-                    Gson gson = new GsonBuilder().setPrettyPrinting().create();
-                    writer.write(gson.toJson(settings));
-                }
-
-                updateLoadedStateFromProfile(newProfileName);
-                // Update combobox
-                profileComboBox.removeItem(oldProfileName);
-                profileComboBox.addItem(newProfileName);
-                profileComboBox.setSelectedItem(newProfileName);
-                updateProfileButtonStates();
-
-                JOptionPane.showMessageDialog(this,
-                        "Profile '" + oldProfileName + "' renamed to '" + newProfileName + "' successfully.", "Success",
-                        JOptionPane.INFORMATION_MESSAGE);
-            } else {
+            if (!profileRepository.getProfileDir().resolve(oldProfileName + ".properties").toFile().exists()) {
                 JOptionPane.showMessageDialog(this, "Profile '" + oldProfileName + "' not found.", "Error",
                         JOptionPane.ERROR_MESSAGE);
+                return;
             }
+
+            profileRepository.renameProfile(oldProfileName, newProfileName);
+
+            // Update lastSelectedLafProfile if it was pointing to the old name
+            Path settingsPath = getGuiSettingsPath();
+            if (Files.exists(settingsPath)) {
+                try (BufferedReader reader = Files.newBufferedReader(settingsPath, StandardCharsets.UTF_8)) {
+                    JsonObject settings = JsonParser.parseReader(reader).getAsJsonObject();
+                    if (settings.has("lastSelectedLafProfile")
+                            && settings.get("lastSelectedLafProfile").getAsString().equals(oldProfileName)) {
+                        settings.addProperty("lastSelectedLafProfile", newProfileName);
+                        try (BufferedWriter writer = Files.newBufferedWriter(settingsPath, StandardCharsets.UTF_8)) {
+                            Gson gson = new GsonBuilder().setPrettyPrinting().create();
+                            writer.write(gson.toJson(settings));
+                        }
+                    }
+                }
+            }
+
+            updateLoadedStateFromProfile(newProfileName);
+            // Update combobox
+            profileComboBox.removeItem(oldProfileName);
+            profileComboBox.addItem(newProfileName);
+            profileComboBox.setSelectedItem(newProfileName);
+            updateProfileButtonStates();
+
+            JOptionPane.showMessageDialog(this,
+                    "Profile '" + oldProfileName + "' renamed to '" + newProfileName + "' successfully.", "Success",
+                    JOptionPane.INFORMATION_MESSAGE);
 
         } catch (Exception e) {
             JOptionPane.showMessageDialog(this, "Error renaming profile: " + e.getMessage(), "Error",
@@ -1157,97 +1079,42 @@ public class AppearancePanel extends JPanel {
         try {
             if (DEFAULT_PROFILE_NAME.equals(profileName)) {
                 resetToDefaultInternal();
-                Path settingsPath = getGuiSettingsPath();
-                JsonObject settings = new JsonObject();
-                if (Files.exists(settingsPath)) {
-                    try (BufferedReader reader = Files.newBufferedReader(settingsPath, StandardCharsets.UTF_8)) {
-                        settings = JsonParser.parseReader(reader).getAsJsonObject();
-                    }
-                }
-                settings.addProperty("lastSelectedLafProfile", DEFAULT_PROFILE_NAME);
-                if (Files.notExists(settingsPath.getParent())) {
-                    Files.createDirectories(settingsPath.getParent());
-                }
-                try (BufferedWriter writer = Files.newBufferedWriter(settingsPath, StandardCharsets.UTF_8)) {
-                    new GsonBuilder().setPrettyPrinting().create().toJson(settings, writer);
-                }
+                saveLastSelectedProfile(DEFAULT_PROFILE_NAME);
                 profileComboBox.setSelectedItem(DEFAULT_PROFILE_NAME);
                 updateLoadedStateFromProfile(DEFAULT_PROFILE_NAME);
                 return;
             }
 
-            Path settingsPath = getGuiSettingsPath();
-            if (Files.exists(settingsPath)) {
-                try (BufferedReader reader = Files.newBufferedReader(settingsPath, StandardCharsets.UTF_8)) {
-                    JsonObject settings = JsonParser.parseReader(reader).getAsJsonObject();
-                    if (settings.has("lookAndFeelProfiles")) {
-                        JsonObject profiles = settings.getAsJsonObject("lookAndFeelProfiles");
-                        if (profiles.has(profileName)) {
-                            JsonObject lafSettings = profiles.getAsJsonObject(profileName);
-                            FlatAnimatedLafChange.showSnapshot();
-                            snapshotShown = true;
-
-                            Map<String, Color> colorOverrides = null;
-
-                            // Apply settings
-                            String themeClassName = null;
-                            if (lafSettings.has("theme")) {
-                                themeClassName = lafSettings.get("theme").getAsString();
-                            }
-
-                            if (lafSettings.has("colorOverrides")) {
-                                colorOverrides = parseColorOverrides(lafSettings.getAsJsonObject("colorOverrides"));
-                            }
-
-                            if (themeClassName != null) {
-                                UIManager.setLookAndFeel(themeClassName);
-                            }
-
-                            if (lafSettings.has("font")) {
-                                JsonObject fontSettings = lafSettings.getAsJsonObject("font");
-                                String family = fontSettings.get("family").getAsString();
-                                int style = fontSettings.get("style").getAsInt();
-                                int size = fontSettings.get("size").getAsInt();
-                                Font font = new Font(family, style, size);
-                                AppearanceModule.updateCommonFontKeys(font);
-                            } else {
-                                AppearanceModule.updateCommonFontKeys(null);
-                            }
-
-                            if (lafSettings.has("consoleFont")) {
-                                JsonObject fontSettings = lafSettings.getAsJsonObject("consoleFont");
-                                String family = fontSettings.get("family").getAsString();
-                                int style = fontSettings.get("style").getAsInt();
-                                int size = fontSettings.get("size").getAsInt();
-                                Font font = new Font(family, style, size);
-                                AppearanceModule.updateCommonConsoleFontKeys(font);
-                            } else {
-                                AppearanceModule.updateCommonConsoleFontKeys(null);
-                            }
-
-                            AppearanceModule.updateAllUIs();
-                            colorSettingsPanel.setProfileOverrides(colorOverrides);
-                            updateLoadedStateFromProfile(profileName);
-                            profileComboBox.setSelectedItem(profileName);
-
-                            // Persist before capturing the new UI snapshot so
-                            // the selector and all other visible state belong
-                            // to the same frame as the newly applied theme.
-                            settings.addProperty("lastSelectedLafProfile", profileName);
-                            try (BufferedWriter writer = Files.newBufferedWriter(settingsPath,
-                                    StandardCharsets.UTF_8)) {
-                                Gson gson = new GsonBuilder().setPrettyPrinting().create();
-                                writer.write(gson.toJson(settings));
-                            }
-
-                            FlatAnimatedLafChange.hideSnapshotWithAnimation();
-                            snapshotShown = false;
-                            return;
-                        }
-                    }
-                }
+            AppearanceProfile profile = profileRepository.loadProfile(profileName);
+            if (profile == null) {
+                throw new IllegalArgumentException("Appearance profile '" + profileName + "' was not found.");
             }
-            throw new IllegalArgumentException("Appearance profile '" + profileName + "' was not found.");
+
+            FlatAnimatedLafChange.showSnapshot();
+            snapshotShown = true;
+
+            String themeClassName = profile.getThemeClassName();
+            if (themeClassName != null) {
+                UIManager.setLookAndFeel(themeClassName);
+            }
+
+            AppearanceModule.updateCommonFontKeys(profile.getGlobalFont());
+            AppearanceModule.updateCommonConsoleFontKeys(profile.getConsoleFont());
+
+            AppearanceModule.updateAllUIs();
+            colorSettingsPanel.setProfileOverrides(profile.getColorOverrides());
+            updateLoadedStateFromProfile(profileName);
+            profileComboBox.setSelectedItem(profileName);
+
+            // Persist lastSelectedLafProfile before hiding the snapshot so
+            // the selector and all other visible state belong to the same
+            // frame as the newly applied theme.
+            saveLastSelectedProfile(profileName);
+
+            FlatAnimatedLafChange.hideSnapshotWithAnimation();
+            snapshotShown = false;
+        } catch (IllegalArgumentException e) {
+            throw e;
         } catch (Exception e) {
             LOGGER.error("Failed to load appearance profile '{}'", profileName, e);
             JOptionPane.showMessageDialog(this, "Error loading profile: " + e.getMessage(), "Error",
@@ -1302,21 +1169,6 @@ public class AppearancePanel extends JPanel {
 
     }
 
-    private static Map<String, Color> parseColorOverrides(JsonObject overridesJson) {
-        if (overridesJson == null) {
-            return null;
-        }
-        Map<String, Color> overrides = new HashMap<>();
-        for (Map.Entry<String, JsonElement> entry : overridesJson.entrySet()) {
-            try {
-                overrides.put(entry.getKey(), Color.decode(entry.getValue().getAsString()));
-            } catch (NumberFormatException e) {
-                // Consider logging this warning
-            }
-        }
-        return overrides;
-    }
-
     private static String toHexString(Color color) {
         if (color.getAlpha() == 255) {
             return String.format("#%02X%02X%02X", color.getRed(), color.getGreen(), color.getBlue());
@@ -1329,36 +1181,33 @@ public class AppearancePanel extends JPanel {
     private void showProfileHelp() {
         JPanel help = new JPanel(new MigLayout("wrap 2, insets 8, gapx 10, gapy 6", "[][grow]", ""));
         help.add(new JLabel("<html><h2>Look and Feel Profiles</h2>"
-                + "Appearance profiles save and load themes, fonts and color settings.<br>"
-                + "The built-in <b>Default</b> profile is read-only.</html>"), "span 2, growx, wrap");
+                + "Appearance profiles save and load themes, fonts and color settings.</html>"), "span 2, growx, wrap");
 
         addProfileHelpRow(help, newProfileBtn, "New Profile",
-                "Creates and selects a profile initialized with the built-in Default appearance.");
-        addProfileHelpRow(help, cloneProfileBtn, "Clone Configuration to New Profile",
-                "Creates and selects a new profile from the current appearance, including unsaved changes.");
-        addProfileHelpRow(help, copyProfileBtn, "Copy Existing Configuration to This Profile",
+                "Creates a new profile initialized with the application default appearance.");
+        addProfileHelpRow(help, cloneProfileBtn, "Clone to New Profile",
+                "Creates a new profile from the current appearance, including unsaved changes.");
+        addProfileHelpRow(help, copyProfileBtn, "Copy Configuration",
                 "Loads another profile into the current editor as unsaved changes.");
+        addProfileHelpRow(help, resetToDefaultBtn, "Reset to Defaults",
+                "Copies the application's hardcoded default values into the current editor (unsaved). "
+                        + "Press Save to persist.");
         addProfileHelpRow(help, renameProfileBtn, "Rename Profile",
-                "Renames the selected custom profile. Default cannot be renamed.");
+                "Renames the selected profile.");
         addProfileHelpRow(help, saveProfileBtn, "Save Profile",
-                "Saves the current appearance to the selected custom profile. Default cannot be overwritten.");
-        addProfileHelpRow(help,
-                IconFontSwing.buildIcon(FontAwesome.REFRESH, GuiConstants.getToolBarIconSize(),
-                        GuiColors.getButtonIcon()),
-                "Reset to Defaults",
-                "In the Copy Configuration dialog: loads the built-in Default values into the editor without "
-                        + "saving to the selected profile.");
+                "Saves the current appearance to the selected profile.");
         addProfileHelpRow(help, reloadProfileBtn, "Refresh",
-                "Refreshes the profile list and reloads the selected profile from disk after confirmation.");
+                "Refreshes the profile list and reloads the selected profile from disk.");
         addProfileHelpRow(help, deleteProfileBtn, "Delete Profile",
-                "Permanently deletes the selected custom profile. Default cannot be deleted.");
+                "Permanently deletes the selected profile.");
 
-        help.add(new JLabel("<html>Profiles are stored in <code>gui-settings.json</code> "
-                + "in your settings directory.</html>"), "span 2, gaptop 4, wrap");
+        help.add(new JLabel("<html>Profiles are stored as <code>.properties</code> files in "
+                + "<code>conf/appearance/profiles/</code>.</html>"), "span 2, gaptop 4, wrap");
         JScrollPane scroll = new JScrollPane(help);
-        scroll.setPreferredSize(new Dimension(540, 430));
-        JOptionPane.showMessageDialog(this, scroll, "About Look and Feel Profiles",
-                JOptionPane.INFORMATION_MESSAGE);
+        scroll.setPreferredSize(new Dimension(480, 420));
+        JOptionPane.showOptionDialog(this, scroll, "About Look and Feel Profiles",
+                JOptionPane.DEFAULT_OPTION, JOptionPane.INFORMATION_MESSAGE, null,
+                new String[] { "OK" }, "OK");
     }
 
     private void addProfileHelpRow(JPanel help, JButton actionButton, String title, String description) {
@@ -1376,12 +1225,6 @@ public class AppearancePanel extends JPanel {
         if (profileName == null || profileName.trim().isEmpty()) {
             return;
         }
-        if (DEFAULT_PROFILE_NAME.equals(profileName)) {
-            JOptionPane.showMessageDialog(this, "The '" + DEFAULT_PROFILE_NAME + "' profile cannot be deleted.",
-                    "Action Not Allowed",
-                    JOptionPane.WARNING_MESSAGE);
-            return;
-        }
 
         int choice = DialogUtils.confirm(this,
                 DialogUtils.actionIcon(FontAwesome.TRASH_O, GuiColors.getContrastRed()),
@@ -1393,44 +1236,40 @@ public class AppearancePanel extends JPanel {
         }
 
         try {
+            profileRepository.deleteProfile(profileName);
+
+            // Update lastSelectedLafProfile if it was pointing to the deleted profile
             Path settingsPath = getGuiSettingsPath();
             if (Files.exists(settingsPath)) {
-                JsonObject settings;
                 try (BufferedReader reader = Files.newBufferedReader(settingsPath, StandardCharsets.UTF_8)) {
-                    settings = JsonParser.parseReader(reader).getAsJsonObject();
-                }
-
-                if (settings.has("lookAndFeelProfiles")) {
-                    JsonObject profiles = settings.getAsJsonObject("lookAndFeelProfiles");
-                    if (profiles.has(profileName)) {
-                        profiles.remove(profileName);
-                        if (settings.has("lastSelectedLafProfile")
-                                && settings.get("lastSelectedLafProfile").getAsString().equals(profileName)) {
-                            settings.addProperty("lastSelectedLafProfile", DEFAULT_PROFILE_NAME);
-                        }
+                    JsonObject settings = JsonParser.parseReader(reader).getAsJsonObject();
+                    if (settings.has("lastSelectedLafProfile")
+                            && settings.get("lastSelectedLafProfile").getAsString().equals(profileName)) {
+                        settings.addProperty("lastSelectedLafProfile", DEFAULT_PROFILE_NAME);
                         try (BufferedWriter writer = Files.newBufferedWriter(settingsPath, StandardCharsets.UTF_8)) {
                             Gson gson = new GsonBuilder().setPrettyPrinting().create();
                             writer.write(gson.toJson(settings));
                         }
-                        String selectedBeforeDelete = (String) profileComboBox.getSelectedItem();
-                        isProgrammaticChange = true;
-                        try {
-                            profileComboBox.removeItem(profileName);
-                            if (profileName.equals(selectedBeforeDelete)) {
-                                profileComboBox.setSelectedItem(DEFAULT_PROFILE_NAME);
-                            }
-                        } finally {
-                            isProgrammaticChange = false;
-                        }
-                        if (profileName.equals(selectedBeforeDelete)) {
-                            performLoadProfile(DEFAULT_PROFILE_NAME);
-                        }
-                        updateProfileButtonStates();
-                        JOptionPane.showMessageDialog(this, "Profile '" + profileName + "' deleted successfully.",
-                                "Success", JOptionPane.INFORMATION_MESSAGE);
                     }
                 }
             }
+
+            String selectedBeforeDelete = (String) profileComboBox.getSelectedItem();
+            isProgrammaticChange = true;
+            try {
+                profileComboBox.removeItem(profileName);
+                if (profileName.equals(selectedBeforeDelete)) {
+                    profileComboBox.setSelectedItem(DEFAULT_PROFILE_NAME);
+                }
+            } finally {
+                isProgrammaticChange = false;
+            }
+            if (profileName.equals(selectedBeforeDelete)) {
+                performLoadProfile(DEFAULT_PROFILE_NAME);
+            }
+            updateProfileButtonStates();
+            JOptionPane.showMessageDialog(this, "Profile '" + profileName + "' deleted successfully.",
+                    "Success", JOptionPane.INFORMATION_MESSAGE);
         } catch (Exception e) {
             JOptionPane.showMessageDialog(this, "Error deleting profile: " + e.getMessage(), "Error",
                     JOptionPane.ERROR_MESSAGE);

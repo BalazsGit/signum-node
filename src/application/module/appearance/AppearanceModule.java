@@ -8,7 +8,6 @@ import application.module.appearance.gui.laf.FlatLafPrefs;
 import application.module.node.gui.GuiResources;
 import application.module.node.props.Props;
 import application.utils.gui.ColorPaletteManager;
-import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.GuiFontManager;
 import application.utils.io.PathUtils;
 
@@ -111,22 +110,17 @@ public class AppearanceModule implements Module {
 
         String settingsDir = Props.SETTINGS_DIR.getDefaultValue();
         Path confPath = PathUtils.resolvePath(confFolder);
-        // The node configuration is layered (3-layer model): the user-editable
-        // L1 layer (default.properties) is merged first, then the "node"
-        // profile file (L2) on top of it, so a key present in either file
-        // overrides the hardcoded default. Literal names (no Signum bridge,
-        // v4.1 migration 2026-08-07): "node" is Signum.PROPERTIES_NAME,
-        // "default" is the user-editable L1 layer.
+        // The node configuration profile file (L2) may override the settings
+        // directory. Only the active "node" profile file is loaded (the 2-layer
+        // architecture: L0 hardcoded ← L2 profile file; no L1 merge).
         Path profilesDir = confPath.resolve(ModuleIds.NODE).resolve(ModuleIds.CATEGORY_PROFILES);
         Properties nodeProps = new Properties();
-        for (String fileName : new String[] { "default.properties", "node.properties" }) {
-            Path candidate = profilesDir.resolve(fileName);
-            if (Files.exists(candidate)) {
-                try (java.io.FileInputStream in = new java.io.FileInputStream(candidate.toFile())) {
-                    nodeProps.load(in);
-                } catch (Exception e) {
-                    // ignore
-                }
+        Path nodeProfileFile = profilesDir.resolve("node.properties");
+        if (Files.exists(nodeProfileFile)) {
+            try (java.io.FileInputStream in = new java.io.FileInputStream(nodeProfileFile.toFile())) {
+                nodeProps.load(in);
+            } catch (Exception e) {
+                // ignore
             }
         }
 
@@ -184,17 +178,13 @@ public class AppearanceModule implements Module {
                         String profileName = settings.has("lastSelectedLafProfile")
                                 ? settings.get("lastSelectedLafProfile").getAsString()
                                 : AppearancePanel.DEFAULT_PROFILE_NAME;
-                        JsonObject profiles = settings.has("lookAndFeelProfiles")
-                                && settings.get("lookAndFeelProfiles").isJsonObject()
-                                ? settings.getAsJsonObject("lookAndFeelProfiles")
-                                : new JsonObject();
-                        if (LEGACY_DEFAULT_PROFILE_NAME.equals(profileName) && !profiles.has(profileName)) {
+                        if (LEGACY_DEFAULT_PROFILE_NAME.equals(profileName)) {
                             profileName = AppearancePanel.DEFAULT_PROFILE_NAME;
                         }
 
                         AppearanceProfile profile = AppearancePanel.DEFAULT_PROFILE_NAME.equals(profileName)
-                                ? new AppearanceProfile(AppearancePanel.DEFAULT_PROFILE_NAME)
-                                : ConfigurationUtils.loadLookAndFeelProfile(settingsPath, profileName);
+                                ? AppearanceDefaults.createDefaultProfile()
+                                : new AppearanceProfileRepository(CONF_FOLDER).loadProfile(profileName);
                         if (profile != null) {
                             if (profile.getThemeClassName() != null) {
                                 themeClassName = profile.getThemeClassName();
@@ -227,7 +217,7 @@ public class AppearanceModule implements Module {
                 updateCommonConsoleFontKeys(consoleFontToApply);
                 ColorPaletteManager.updatePalette(colorOverrides);
                 
-                logger.info("[GUI-DEBUG] Initial LAF setup complete. Theme={}, TabLayoutPolicy={}", 
+                logger.debug("[GUI-DEBUG] Initial LAF setup complete. Theme={}, TabLayoutPolicy={}", 
                         themeClassName, 
                         application.utils.gui.GuiManager.getInstance().getTabLayoutPolicyName());
             } else {
@@ -285,6 +275,11 @@ public class AppearanceModule implements Module {
         // Re-apply global tab layout policy after UI refresh to ensure it persists
         // across runtime theme changes (flatlaf properties may be reset by updateUI)
         UIManager.put("TabbedPane.tabLayoutPolicy", application.utils.gui.GuiManager.getInstance().getTabLayoutPolicy());
+
+        // Re-apply the translucent tooltip background after the UI refresh: a
+        // runtime theme change (setLookAndFeel) clears all UIManager overrides, so
+        // the semi-transparent ToolTip.background must be set again.
+        application.utils.gui.GuiManager.getInstance().applyTranslucentToolTips();
 
         FlatLaf.revalidateAndRepaintAllFramesAndDialogs();
 

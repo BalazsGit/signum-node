@@ -167,15 +167,6 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
             setAppliedProfileNameSupplier(this::resolveNodeAppliedProfileName);
         }
 
-        // Node-specific File Handler rows (not present in the provider defaults).
-        // Their defaults mirror the "file logging recipe" kept in the reserved
-        // default file (conf/node/logging/logging-default.properties) — uncommenting
-        // that recipe block enables file logging with exactly these values.
-        addExtraField("java.util.logging.FileHandler.level",   "File Level",            "FINE");
-        addExtraField("java.util.logging.FileHandler.pattern", "Log File Pattern",      "node.log");
-        addExtraField("java.util.logging.FileHandler.limit",   "File Size Limit (bytes)", "5000000");
-        addExtraField("java.util.logging.FileHandler.count",   "File Count",            "1");
-
         // Apply → record the per-node assignment (SSOT) then apply it LIVE to the
         // running node (P2.4: no restart — the node context is reconfigured in place).
         // (The core already persisted the shared module marker and showed the confirmation.)

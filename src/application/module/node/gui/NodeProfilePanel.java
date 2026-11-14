@@ -36,8 +36,6 @@ import javax.swing.event.ChangeListener;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Profile panel for a single NodeProfile instance.
@@ -52,7 +50,20 @@ import org.slf4j.LoggerFactory;
  */
 @SuppressWarnings("serial")
 public class NodeProfilePanel extends JPanel {
-    private static final Logger LOGGER = LoggerFactory.getLogger(NodeProfilePanel.class);
+
+    /**
+     * F5 (node.gui hybrid routing, Q7/D7): this per-node view component logs on the
+     * owned node's isolated {@code NodeLoggers} (node context) once a {@link Signum} is
+     * attached; otherwise (late binding / headless) it falls back to the class-based
+     * (global) logger. The node-context &rarr; System Console forward path is unchanged.
+     */
+    private org.apache.logging.log4j.Logger nodeContextLogger() {
+        Signum s = this.signum;
+        if (s != null) {
+            return s.loggers().forClass(NodeProfilePanel.class);
+        }
+        return org.apache.logging.log4j.LogManager.getLogger(NodeProfilePanel.class);
+    }
 
     /**
      * P8/F4: this panel's node-relevant lifecycle messages route to the profile's own
@@ -126,7 +137,7 @@ public class NodeProfilePanel extends JPanel {
         // known here, so we also ensure the ProfileLogger exists now; the Signum adopts
         // this same instance when the node starts, so nothing logged before then is lost.
         application.utils.logging.NodeLoggerRegistry.getOrCreate(ModuleIds.NODE, profile.getName());
-        LOGGER.debug("NodeProfilePanel constructor START for profile: {}", profile.getName());
+        nodeContextLogger().debug("NodeProfilePanel constructor START for profile: {}", profile.getName());
         
         try {
             this.parentFrame = parentFrame;
@@ -156,10 +167,10 @@ public class NodeProfilePanel extends JPanel {
             // border).
             setBorder(BorderFactory.createEmptyBorder(5, 5, 2, 5));
 
-            LOGGER.debug("Creating NodeInfoBar for profile: {}", profile.getName());
+            nodeContextLogger().debug("Creating NodeInfoBar for profile: {}", profile.getName());
             infoBar = new NodeInfoBar(profile);
             
-            LOGGER.debug("Creating NodeToolbar for profile: {}", profile.getName());
+            nodeContextLogger().debug("Creating NodeToolbar for profile: {}", profile.getName());
             toolbar = new NodeToolbar(profile);
             // v4: when the toolbar starts the node, hand the instance back so this
             // panel can adopt it (single state listener) and attach the console.
@@ -190,7 +201,7 @@ public class NodeProfilePanel extends JPanel {
             GuiFontManager.applyDefaultFont(innerTabbedPane);
             GuiUtils.applyDefaultTabLayoutPolicy(innerTabbedPane);
 
-            LOGGER.debug("Creating NodeConsolePanel for profile: {}", profile.getName());
+            nodeContextLogger().debug("Creating NodeConsolePanel for profile: {}", profile.getName());
             consolePanel = new NodeConsolePanel(parentFrame, profile);
             if (signum != null) {
                 consolePanel.setSignum(signum);
@@ -200,9 +211,9 @@ public class NodeProfilePanel extends JPanel {
             // was constructed before the Signum existed), adopt the started instance.
             consolePanel.setOnSignumStarted(this::adoptSignum);
             innerTabbedPane.addTab("Console", consolePanel);
-            LOGGER.debug("Console tab added successfully");
+            nodeContextLogger().debug("Console tab added successfully");
 
-            LOGGER.debug("Creating NodeConfigurationPanel for profile: {}", profile.getName());
+            nodeContextLogger().debug("Creating NodeConfigurationPanel for profile: {}", profile.getName());
             // Pass this node's own profile name explicitly so the panel does not rely
             // on the deprecated global "active node" lookup.
             configurationPanel = new NodeConfigurationPanel(
@@ -217,14 +228,14 @@ public class NodeProfilePanel extends JPanel {
                 configurationPanel.setSignum(signum);
             }
             innerTabbedPane.addTab("Configuration", configurationPanel);
-            LOGGER.debug("Configuration tab added successfully");
+            nodeContextLogger().debug("Configuration tab added successfully");
 
-            LOGGER.debug("Creating LoggerConfigurationPanel for profile: {}", profile.getName());
+            nodeContextLogger().debug("Creating LoggerConfigurationPanel for profile: {}", profile.getName());
             loggingPanel = new NodeLoggingPanel(profile.getName(), this::applyLoggingLive);
             innerTabbedPane.addTab("Logging", loggingPanel);
-            LOGGER.debug("Logging tab added successfully");
+            nodeContextLogger().debug("Logging tab added successfully");
 
-            LOGGER.debug("Adding innerTabbedPane to CENTER (total tabs: {})", innerTabbedPane.getTabCount());
+            nodeContextLogger().debug("Adding innerTabbedPane to CENTER (total tabs: {})", innerTabbedPane.getTabCount());
             add(innerTabbedPane, BorderLayout.CENTER);
 
             // The console's bottom status strip (latest block / sync progress /
@@ -251,10 +262,10 @@ public class NodeProfilePanel extends JPanel {
                 }
             });
 
-            LOGGER.debug("Wiring toolbar callbacks for profile: {}", profile.getName());
+            nodeContextLogger().debug("Wiring toolbar callbacks for profile: {}", profile.getName());
             wireToolbarCallbacks();
             
-            LOGGER.debug("Wiring console visibility tracking for profile: {}", profile.getName());
+            nodeContextLogger().debug("Wiring console visibility tracking for profile: {}", profile.getName());
             wireConsoleVisibilityTracking();
 
             // Adopt the Signum if it already exists at construction time:
@@ -277,10 +288,10 @@ public class NodeProfilePanel extends JPanel {
                 GuiFontManager.applyDefaultFont(innerTabbedPane);
             });
 
-            LOGGER.debug("NodeProfilePanel constructor COMPLETED SUCCESSFULLY for profile: {} (tabs: {})", 
+            nodeContextLogger().debug("NodeProfilePanel constructor COMPLETED SUCCESSFULLY for profile: {} (tabs: {})", 
                     profile.getName(), innerTabbedPane.getTabCount());
         } catch (Exception e) {
-            LOGGER.error("NodeProfilePanel constructor FAILED for profile: {}", profile.getName(), e);
+            nodeContextLogger().error("NodeProfilePanel constructor FAILED for profile: {}", profile.getName(), e);
             throw e;
         }
     }
@@ -378,7 +389,7 @@ public class NodeProfilePanel extends JPanel {
         try {
             registered = NodeModule.getInstance().get(profile.getName());
         } catch (Exception e) {
-            LOGGER.debug("ensureSignumAdopted: registry lookup failed for profile '{}'", profile.getName(), e);
+            nodeContextLogger().debug("ensureSignumAdopted: registry lookup failed for profile '{}'", profile.getName(), e);
             return;
         }
         if (registered != null && registered != signum) {
@@ -557,7 +568,7 @@ public class NodeProfilePanel extends JPanel {
         try {
             Desktop.getDesktop().open(file);
         } catch (java.io.IOException e) {
-            LOGGER.error("Could not open conf file with default editor", e);
+            nodeContextLogger().error("Could not open conf file with default editor", e);
         }
     }
 
@@ -578,10 +589,10 @@ public class NodeProfilePanel extends JPanel {
             try {
                 Desktop.getDesktop().browse(new URI(address));
             } catch (Exception e) {
-                LOGGER.error("Could not open browser", e);
+                nodeContextLogger().error("Could not open browser", e);
             }
         } catch (Exception e) {
-            LOGGER.error("Could not access PropertyService", e);
+            nodeContextLogger().error("Could not access PropertyService", e);
         }
     }
 
@@ -630,7 +641,7 @@ public class NodeProfilePanel extends JPanel {
                         JOptionPane.showMessageDialog(this, e.getMessage(),
                                 "Database Check Unavailable", JOptionPane.INFORMATION_MESSAGE));
             } catch (Exception ex) {
-                LOGGER.error("Error during DB check", ex);
+                nodeContextLogger().error("Error during DB check", ex);
                 SwingUtilities.invokeLater(() ->
                         JOptionPane.showMessageDialog(this, "An error occurred during the database check.",
                                 "Error", JOptionPane.ERROR_MESSAGE));
@@ -777,7 +788,7 @@ public class NodeProfilePanel extends JPanel {
     private void applyLoggingLive() {
         Signum node = NodeModule.getInstance().get(profile.getName());
         if (node == null || node.getState() != Signum.State.RUNNING) {
-            LOGGER.info("Apply-logging for profile '{}': previous state {} — the node was not "
+            nodeContextLogger().info("Apply-logging for profile '{}': previous state {} — the node was not "
                     + "running, so it is not started (the saved logging profile takes "
                     + "effect at the next start)",
                     profile.getName(), node == null ? "unregistered" : node.getState());
@@ -794,7 +805,7 @@ public class NodeProfilePanel extends JPanel {
             throw new IllegalStateException("Failed to apply the live logging configuration for profile '"
                     + profile.getName() + "' - the node kept its previous configuration");
         }
-        LOGGER.info("Node logging applied live for profile '{}' — no restart needed", profile.getName());
+        nodeContextLogger().info("Node logging applied live for profile '{}' — no restart needed", profile.getName());
     }
 
     public NodeProfile getProfile() { return profile; }
@@ -816,7 +827,7 @@ public class NodeProfilePanel extends JPanel {
         int consoleIndex = innerTabbedPane.indexOfTab("Console");
         if (consoleIndex >= 0 && innerTabbedPane.getSelectedIndex() != consoleIndex) {
             innerTabbedPane.setSelectedIndex(consoleIndex);
-            LOGGER.debug("Switched to Console tab for panel visibility");
+            nodeContextLogger().debug("Switched to Console tab for panel visibility");
         }
     }
 
@@ -983,13 +994,13 @@ public class NodeProfilePanel extends JPanel {
 
     public void onStatusMessage(String message) {
         SwingUtilities.invokeLater(() -> {
-            LOGGER.debug("[{}] Status: {}", profile.getName(), message);
+            nodeContextLogger().debug("[{}] Status: {}", profile.getName(), message);
         });
     }
 
     public void onError(String errorMessage) {
         SwingUtilities.invokeLater(() -> {
-            LOGGER.error("[{}] Error: {}", profile.getName(), errorMessage);
+            nodeContextLogger().error("[{}] Error: {}", profile.getName(), errorMessage);
             JOptionPane.showMessageDialog(
                     this,
                     "Node error: " + errorMessage,

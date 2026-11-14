@@ -15,9 +15,8 @@ import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiFontManager;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.NewProfileChoiceDialog;
+import application.utils.gui.ProfileActionIcon;
 import application.utils.gui.TabUtils;
-import jiconfont.icons.font_awesome.FontAwesome;
-import jiconfont.swing.IconFontSwing;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -615,7 +614,14 @@ public class NodePanel extends JPanel  {
      */
     private JButton buildNewProfileButton() {
         JButton button = new NewProfileButton();
-        button.setIcon(new PlusGlyph());
+        // Static glyph — no grow-on-hover. The profile tabs flanking this trailing "+" don't
+        // grow on hover, so neither does the "+": grow-on-hover is reserved for the
+        // configuration-panel function buttons. The rounded hover highlight
+        // (NewProfileButton#paintComponent) still marks it as a clickable control.
+        // 11 px: the "+" cross (≈10 px) sits in step with the tab strip's overflow chevrons
+        // and just above the close "X" (an 8 px diagonal — see CloseGlyph). The former 16 px
+        // box rendered a ~15 px cross that read as visibly larger than both neighbours.
+        button.setIcon(ProfileActionIcon.NEW_PROFILE.normal(11));
         button.setToolTipText("Create a new node profile (setup wizard or empty default profile)");
         button.addActionListener(e -> showNewProfileMenu());
         return button;
@@ -1106,42 +1112,6 @@ public class NodePanel extends JPanel  {
                 g2.dispose();
             }
             super.paintComponent(g);
-        }
-    }
-
-    /**
-     * The trailing "+" glyph of the new-profile button. Kept pixel-identical to the Browser module's
-     * new-tab "+" (same 16px box, same 8px cross, same 1.4f stroke, same {@code controlText} colour)
-     * so the two "new" buttons render the same everywhere, and it matches this panel's close "X" glyph
-     * ({@link #CloseGlyph}).
-     */
-    private static final class PlusGlyph implements Icon {
-
-        private static final int SIZE = 16;
-
-        @Override
-        public int getIconWidth() {
-            return SIZE;
-        }
-
-        @Override
-        public int getIconHeight() {
-            return SIZE;
-        }
-
-        @Override
-        public void paintIcon(Component c, java.awt.Graphics g, int x, int y) {
-            java.awt.Graphics2D g2 = (java.awt.Graphics2D) g.create();
-            g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
-                    java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
-            java.awt.Color color = javax.swing.UIManager.getColor("controlText");
-            g2.setColor(color != null ? color : new java.awt.Color(0x20, 0x21, 0x24));
-            g2.setStroke(new java.awt.BasicStroke(1.4f));
-            int cx = x + SIZE / 2;
-            int cy = y + SIZE / 2;
-            g2.drawLine(cx - 4, cy, cx + 4, cy);
-            g2.drawLine(cx, cy - 4, cx, cy + 4);
-            g2.dispose();
         }
     }
 

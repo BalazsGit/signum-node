@@ -49,8 +49,9 @@ import java.util.regex.Matcher;
  *   <li><b>Linked mode</b> (a database profile is linked,
  *       {@code "Engine:Profile"}): the profile selects the configuration —
  *       Path is read-only (the convention directory), the DB file is picked
- *       from the profile's {@code *.db} files (SQLite) or the database
- *       instance is picked from the profile's instance list (server engines),
+ *       (non-editable select) from the profile's {@code *.db} files (SQLite)
+ *       or the database instance is picked from the profile's instance list
+ *       (server engines),
  *       and the host/port/suffix/user/password rows are derived, read-only,
  *       from the instance.</li>
  *   <li><b>Color coding</b>: every row is colored against the (saved, applied)
@@ -135,6 +136,7 @@ public class JdbcConfigurationPanel extends JPanel {
     // --- Row labels ---
     private final JLabel engineLabel, profileLabel, pathLabel, dbLabel;
     private final JLabel hostLabel, portLabel, suffixLabel, userLabel, passLabel;
+    private final JLabel validationLabel;
 
     // --- Slot overlays (one visual row, two implementations) ---
     private final JPanel dbSlot;      // "FILE" = dbCombo, "TEXT" = databaseField
@@ -212,8 +214,10 @@ public class JdbcConfigurationPanel extends JPanel {
 
         engineCombo = new JComboBox<>(DatabaseConfigurationPanel.DatabaseEngine.values());
         engineCombo.setSelectedItem(DatabaseConfigurationPanel.DatabaseEngine.SQLITE);
+        // A PLAIN (non-editable) select over the engine's existing database profiles —
+        // a new profile is never typed in here (creation is the host's "+" button's
+        // job, see {@link #requestLinkMode}).
         profileCombo = new JComboBox<>();
-        profileCombo.setEditable(true);
         pathCombo = new JComboBox<>();
         pathCombo.setEditable(true);
         pathCombo.getEditor().setItem("./database/SQLite");
@@ -249,6 +253,9 @@ public class JdbcConfigurationPanel extends JPanel {
         suffixLabel = label("Suffix:");
         userLabel = label("Username:");
         passLabel = label("Password:");
+        validationLabel = label("");
+        validationLabel.setForeground(GuiColors.getContrastRed());
+        validationLabel.setVisible(false);
 
         dbSlot = slot("FILE", dbCombo, "TEXT", databaseField);
         userSlot = slot("FIELD", userField, "COMBO", userCombo);
@@ -268,9 +275,9 @@ public class JdbcConfigurationPanel extends JPanel {
         // The EDITABLE combos get the same editor unification (no inner L&F
         // field border, plain-combo text margin and preferred height) as the
         // configuration's state-aware dropdowns — so the db.url section's
-        // dropdowns behave exactly like every other one. (engineCombo and
-        // userCombo are non-editable and keep the L&F's own chrome.)
-        ConfigurationUtils.styleComboEditor(profileCombo);
+        // dropdowns behave exactly like every other one. (engineCombo,
+        // profileCombo and userCombo are non-editable and keep the L&F's own
+        // chrome.)
         ConfigurationUtils.styleComboEditor(pathCombo);
         ConfigurationUtils.styleComboEditor(dbCombo);
 
@@ -278,6 +285,7 @@ public class JdbcConfigurationPanel extends JPanel {
         addRow(profileLabel, profileCombo);
         addRow(pathLabel, pathCombo);
         addRow(dbLabel, dbSlot);
+        add(validationLabel, "span 2, growx, wrap");
         addRow(hostLabel, hostField);
         addRow(portLabel, portField);
         addRow(suffixLabel, suffixField);
@@ -378,7 +386,6 @@ public class JdbcConfigurationPanel extends JPanel {
         style(userCombo);
         style(passField);
         stylePreviewText(previewField);
-        ConfigurationUtils.styleComboEditor(profileCombo);
         ConfigurationUtils.styleComboEditor(pathCombo);
         ConfigurationUtils.styleComboEditor(dbCombo);
         revalidate();
@@ -560,17 +567,6 @@ public class JdbcConfigurationPanel extends JPanel {
         textChanges(suffixField, this::markManualEdit);
         textChanges(userField, this::markManualEdit);
         textChanges(passField, this::markManualEdit);
-        textChanges((JTextField) profileCombo.getEditor().getEditorComponent(), () -> {
-            if (isProgrammatic() || !linked) {
-                return;
-            }
-            // Live recolor/dirty signal only (like the other text fields):
-            // firing a LINK change here would commit (persist) the in-flight
-            // half-typed name and overwrite the saved baseline. The link
-            // itself commits on Enter/selection (the Action listener), which
-            // refreshes the instance list and lets the host persist it.
-            fireChange();
-        });
         textChanges((JTextField) dbCombo.getEditor().getEditorComponent(), () -> {
             if (isProgrammatic()) {
                 return;
@@ -666,6 +662,40 @@ public class JdbcConfigurationPanel extends JPanel {
     private void updatePreviewText() {
         String url = getJdbcUrl();
         previewField.setText(url.isEmpty() ? "(no database URL)" : url);
+        updateValidationDisplay();
+    }
+
+    /**
+     * The SQLite URL is saveable only when it names a database file with the
+     * required {@code .db} extension. Server database URLs are not restricted.
+     */
+    public String getValidationError() {
+        if (!isSqlite()) {
+            return null;
+        }
+        SqliteDatabasePaths.SqliteUrlParts parts = SqliteDatabasePaths.splitUrl(getJdbcUrl());
+        return parts != null && SqliteDatabasePaths.isDbFile(parts.fileName())
+                ? null
+                : "Only files with the .db extension are allowed.";
+    }
+
+    private void updateValidationDisplay() {
+        String error = getValidationError();
+        boolean invalid = error != null;
+        validationLabel.setText(invalid ? error : "");
+        validationLabel.setVisible(invalid);
+        if (invalid) {
+            Color errorColor = GuiColors.getContrastRed();
+            dbCombo.setForeground(errorColor);
+            if (dbCombo.isEditable() && dbCombo.getEditor() != null
+                    && dbCombo.getEditor().getEditorComponent() instanceof JComponent editor) {
+                editor.setForeground(errorColor);
+            }
+            dbCombo.setToolTipText(error);
+            validationLabel.setToolTipText(error);
+        } else {
+            validationLabel.setToolTipText(null);
+        }
     }
 
     private boolean isSqlite() {
@@ -688,12 +718,12 @@ public class JdbcConfigurationPanel extends JPanel {
         engineLabel.setVisible(true);
         engineCombo.setVisible(true);
 
-        // Profile: linked mode only (server: read-only — the profile exists in
-        // the database module; SQLite: editable — a new profile name may be
-        // typed).
+        // Profile: linked mode only — a PLAIN (non-editable) select over the
+        // engine's existing database profiles (every engine: the profile exists
+        // in the database module; a new one is created with the host's "+"
+        // button, never typed into the dropdown).
         profileLabel.setVisible(linked);
         profileCombo.setVisible(linked);
-        profileCombo.setEditable(linked && sqlite);
 
         // Path: manual SQLite only.
         pathLabel.setVisible(!linked && sqlite);
@@ -720,6 +750,13 @@ public class JdbcConfigurationPanel extends JPanel {
         suffixLabel.setVisible(server);
         suffixField.setVisible(server);
         suffixField.setEditable(server && !linked);
+
+        // The DB file / database select is editable only in manual mode (an
+        // arbitrary value can be typed). In linked mode it is a plain select
+        // over the profile's *.db files (SQLite) or its database instances
+        // (server engines) — adding a new database file to a profile is the
+        // database-profile wizard's job (the host's "+" button), not this row's.
+        dbCombo.setEditable(!linked);
 
         // Username: server only; a text field in manual mode, the instance's
         // user select in linked mode.
@@ -750,12 +787,13 @@ public class JdbcConfigurationPanel extends JPanel {
     /**
      * Requests a link-mode toggle (the host's "Linked Database Profile"
      * checkbox). Turning the link on materializes it from the current engine +
-     * profile selection (a server engine without any database profile rejects
-     * the link — a link exists only with a profile). Turning it off changes
-     * only the URL composition mode: the manual Path, Profile and DB-file
-     * inputs remain independent and keep their current values. Re-enabling
-     * the link restores the linked profile path while retaining the selected
-     * profile and DB file.
+     * profile selection (an engine without ANY existing database profile
+     * rejects the link — a link exists only with an existing profile; creating
+     * one is the host's "+" button's job, which then re-requests the link).
+     * Turning it off changes only the URL composition mode: the manual Path,
+     * Profile and DB-file inputs remain independent and keep their current
+     * values. Re-enabling the link restores the linked profile path while
+     * retaining the selected profile and DB file.
      */
     public void requestLinkMode(boolean newLinked) {
         if (newLinked == linked) {
@@ -763,12 +801,16 @@ public class JdbcConfigurationPanel extends JPanel {
             return;
         }
         boolean enableLink = newLinked;
-        String selectedProfile = getProfileName();
         String selectedSqliteFile = isSqlite() ? sqliteFileSelection() : "";
         programmaticDepth++;
         try {
-            if (enableLink && !isSqlite() && profileCombo.getItemCount() == 0) {
-                refreshProfileList();
+            if (enableLink) {
+                // The profile select lists ONLY existing database profiles:
+                // without a single one there is nothing to link to, so the link
+                // stays off (the host syncs its checkbox back).
+                if (profileCombo.getItemCount() == 0) {
+                    refreshProfileList();
+                }
                 if (profileCombo.getItemCount() == 0) {
                     LOGGER.warn("No {} database profile available — the link stays off", getEngine());
                     enableLink = false;
@@ -780,23 +822,11 @@ public class JdbcConfigurationPanel extends JPanel {
                     profileCombo.setSelectedItem(profileCombo.getItemAt(0));
                 }
                 setLinkedInternal(true);
-                if (isSqlite() && !selectedProfile.isEmpty()) {
-                    profileCombo.setEditable(true);
-                    if (!comboContains(profileCombo, selectedProfile)) {
-                        profileCombo.addItem(selectedProfile);
-                    }
-                    profileCombo.setSelectedItem(selectedProfile);
-                }
                 refreshInstanceList();
                 if (isSqlite() && !selectedSqliteFile.isEmpty()) {
                     selectSqliteFile(selectedSqliteFile);
                 }
             } else if (!newLinked) {
-                if (isSqlite() && !selectedProfile.isEmpty()
-                        && !comboContains(profileCombo, selectedProfile)) {
-                    profileCombo.addItem(selectedProfile);
-                    profileCombo.setSelectedItem(selectedProfile);
-                }
                 setLinkedInternal(false);
                 if (isSqlite()) {
                     // The mode toggle changes only the URL's directory source:
@@ -913,7 +943,7 @@ public class JdbcConfigurationPanel extends JPanel {
         // only carries optional tuning), so a folder without one still links.
         if (savedUrl.toLowerCase(Locale.ROOT).startsWith("jdbc:sqlite:")) {
             SqliteDatabasePaths.SqliteUrlParts parts = SqliteDatabasePaths.splitUrl(savedUrl);
-            if (parts != null) {
+            if (parts != null && SqliteDatabasePaths.isDbFile(parts.fileName())) {
                 String derived = SqliteDatabasePaths.deriveProfileName(parts.dir());
                 if (derived != null && Files.isDirectory(SqliteDatabasePaths.profileDir(derived))) {
                     applyLink("SQLite:" + derived, url, username);
@@ -955,7 +985,7 @@ public class JdbcConfigurationPanel extends JPanel {
         }
         String name = null;
         SqliteDatabasePaths.SqliteUrlParts parts = SqliteDatabasePaths.splitUrl(getJdbcUrl());
-        if (parts != null) {
+        if (parts != null && SqliteDatabasePaths.isDbFile(parts.fileName())) {
             name = SqliteDatabasePaths.deriveProfileName(parts.dir());
             if (name != null && !Files.isDirectory(SqliteDatabasePaths.profileDir(name))) {
                 name = null;
@@ -1160,21 +1190,11 @@ public class JdbcConfigurationPanel extends JPanel {
     }
 
     /**
-     * The linked database profile name, or the empty string in manual mode.
-     * While the user types into the editable profile select this returns the
-     * LIVE editor text (the combo model only commits it on Enter/selection) —
-     * so the effective link, the composed URL and the color coding track the
-     * keystrokes; the commit-time value is the same the model ends up with.
+     * The linked database profile name, or the empty string in manual mode /
+     * when no profile is selected. The profile select is a plain (non-editable)
+     * dropdown over existing profiles, so the model selection IS the value.
      */
     public String getProfileName() {
-        if (profileCombo.isEditable()
-                && profileCombo.getEditor() != null
-                && profileCombo.getEditor().getEditorComponent() instanceof JTextField editor) {
-            String text = editor.getText().trim();
-            if (!text.isEmpty()) {
-                return text;
-            }
-        }
         Object sel = profileCombo.getSelectedItem();
         return sel == null ? "" : sel.toString().trim();
     }
@@ -1412,8 +1432,22 @@ public class JdbcConfigurationPanel extends JPanel {
         if (isSqlite()) {
             SqliteDatabasePaths.SqliteUrlParts parts = SqliteDatabasePaths.splitUrl(preferredUrl);
             String wanted = parts != null ? parts.fileName() : "";
-            if (!wanted.isEmpty() && comboContains(dbCombo, wanted)) {
-                setSqliteFileSelection(wanted);
+            if (!wanted.isEmpty()) {
+                String profileName = getProfileName();
+                if (!comboContains(dbCombo, wanted)
+                        && parts != null
+                        && profileName != null && !profileName.isBlank()
+                        && SqliteDatabasePaths.normalize(parts.dir().toString()).equals(
+                                SqliteDatabasePaths.normalize(
+                                        SqliteDatabasePaths.profileDir(profileName).toString()))) {
+                    // Preserve a convention-folder URL's current file even
+                    // when its extension is not one of the picker-discovered
+                    // *.db files (or the file does not exist yet).
+                    dbCombo.addItem(wanted);
+                }
+                if (comboContains(dbCombo, wanted)) {
+                    setSqliteFileSelection(wanted);
+                }
             } else if (dbCombo.getItemCount() > 0 && dbCombo.getSelectedItem() == null) {
                 dbCombo.setSelectedItem(dbCombo.getItemAt(0));
             }
@@ -1451,23 +1485,31 @@ public class JdbcConfigurationPanel extends JPanel {
 
     /**
      * Fills the DB file select with the {@code *.db} files of the given
-     * directory (plus the default file name when none is found).
+     * directory (plus the default file name when none is found). The current
+     * selection is always RETAINED: when the wanted file is not among the
+     * discovered ones it is still offered as a selectable option (the
+     * selection survives mode switches and path changes, like the former
+     * editable editor's text did).
      *
-     * @param wanted          the file name to select when offered
-     * @param autoSelectFirst select the first file when {@code wanted} is not
-     *                        offered (an empty selection keeps the untouched
-     *                        original URL)
+     * @param wanted          the file name to select (offered even when not
+     *                        discovered)
+     * @param autoSelectFirst select the first file when {@code wanted} is
+     *                        empty and nothing is selected (an empty
+     *                        selection keeps the untouched original URL)
      */
     private void refreshSqliteFiles(Path dir, String wanted, boolean autoSelectFirst) {
         programmaticDepth++;
         try {
+            String w = wanted == null ? "" : wanted.trim();
             dbCombo.removeAllItems();
             List<String> files = SqliteDatabasePaths.discoverDbFiles(dir);
             files.forEach(dbCombo::addItem);
             if (files.isEmpty()) {
                 dbCombo.addItem(ProfileCreateDefaults.DEFAULT_SQLITE_FILE_NAME);
             }
-            String w = wanted == null ? "" : wanted.trim();
+            if (!w.isEmpty() && !comboContains(dbCombo, w)) {
+                dbCombo.addItem(w);
+            }
             if (!w.isEmpty()) {
                 setSqliteFileSelection(w);
             } else if (autoSelectFirst && dbCombo.getItemCount() > 0 && dbCombo.getSelectedItem() == null) {
@@ -1487,7 +1529,12 @@ public class JdbcConfigurationPanel extends JPanel {
 
     private void setSqliteFileSelection(String fileName) {
         dbCombo.setSelectedItem(fileName);
-        dbCombo.getEditor().setItem(fileName);
+        // A plain (non-editable, linked-mode) select has no usable editor —
+        // the selected item IS the value; the editable manual-mode combo
+        // commits the visible text to the model via its editor.
+        if (dbCombo.isEditable() && dbCombo.getEditor() != null) {
+            dbCombo.getEditor().setItem(fileName);
+        }
     }
 
     private void refreshSqlitePathOptions() {
@@ -1601,6 +1648,7 @@ public class JdbcConfigurationPanel extends JPanel {
                 statusOfValue(getUsername(), appliedState.username(), savedState.username()));
         paint(passField, passLabel,
                 statusOfValue(getPassword(), appliedState.password(), savedState.password()));
+        updateValidationDisplay();
     }
 
     /**
@@ -1863,7 +1911,7 @@ public class JdbcConfigurationPanel extends JPanel {
         return engineCombo;
     }
 
-    /** The (editable) profile select (linked mode). */
+    /** The profile select (linked mode) — a plain, non-editable dropdown. */
     public JComponent getProfileComboComponent() {
         return profileCombo;
     }
