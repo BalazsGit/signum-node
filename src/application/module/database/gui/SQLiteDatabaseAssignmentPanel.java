@@ -11,6 +11,8 @@ import application.utils.config.PropertiesProfileLoader;
 import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
+import application.utils.gui.ResponsiveToolbarScrollPane;
+import application.utils.gui.SearchMatchPanel;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 
@@ -18,16 +20,22 @@ import javax.swing.AbstractCellEditor;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
+import javax.swing.JDialog;
+import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
+import net.miginfocom.swing.MigLayout;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableCellEditor;
 import java.awt.BorderLayout;
 import java.awt.Component;
+import java.awt.Dialog;
 import java.awt.FlowLayout;
+import java.awt.Font;
+import java.awt.Insets;
 import java.io.IOException;
 import java.io.Reader;
 import java.nio.file.Files;
@@ -47,14 +55,18 @@ import java.util.Set;
  * unlike server database links, they are not stored in {@code profiles.json}.
  * Changes are staged in the table and written to the node properties files
  * when applied.</p>
+ *
+ * <p>The table shows full module paths ({@code Node/name} → {@code SQLite/name})
+ * with per-row state coloring (Unsaved/Saved) and a details ({@code ?}) button
+ * that opens a popup with the resolved URL, database file and profile settings.</p>
  */
 final class SQLiteDatabaseAssignmentPanel extends JPanel {
 
     private static final String DEFAULT = "(default)";
     private static final String CUSTOM = "(custom URL)";
-    private static final String COL_NODE_PROFILE = "Node profile";
-    private static final String COL_SQLITE_PROFILE = "SQLite profile";
-    private static final String COL_DATABASE_FILE = "Database file / URL";
+    private static final String COL_NODE_PROFILE = "Node Profile";
+    private static final String COL_SQLITE_PROFILE = "SQLite Profile";
+    private static final String COL_DETAILS = " ";
 
     private final String confRoot;
     private final DefaultTableModel model;
@@ -63,13 +75,27 @@ final class SQLiteDatabaseAssignmentPanel extends JPanel {
     private final Map<String, String> baseline = new LinkedHashMap<>();
 
     SQLiteDatabaseAssignmentPanel(String confRoot) {
-        super(new BorderLayout(8, 8));
+        super(new BorderLayout(0, ConfigurationUtils.PROPERTY_ROW_GAP));
         this.confRoot = confRoot;
         IconFontSwing.register(FontAwesome.getIconFont());
         setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
 
+        // --- Search row (SSOT: same as the profiles tab and the node panel) ---
+        SearchMatchPanel searchMatchPanel = new SearchMatchPanel("Search node profiles");
+        JPanel searchStrip = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        searchStrip.setOpaque(false);
+        searchStrip.add(searchMatchPanel);
+        JScrollPane searchScroll = new ResponsiveToolbarScrollPane(
+                searchStrip, new Insets(0, 10, 0, 5), false);
+        searchScroll.setBorder(BorderFactory.createEmptyBorder(4, 0, 4, 0));
+        JPanel searchRow = new JPanel(new BorderLayout());
+        searchRow.setOpaque(false);
+        searchRow.add(searchScroll, BorderLayout.CENTER);
+        add(searchRow, BorderLayout.NORTH);
+
+        // --- Table ---
         model = new DefaultTableModel(
-                new Object[] {COL_NODE_PROFILE, COL_SQLITE_PROFILE, COL_DATABASE_FILE}, 0) {
+                new Object[] {COL_NODE_PROFILE, COL_SQLITE_PROFILE, COL_DETAILS}, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
                 return column == 1;
@@ -78,20 +104,25 @@ final class SQLiteDatabaseAssignmentPanel extends JPanel {
         table = new JTable(model);
         table.setDefaultEditor(Object.class, new ProfileCellEditor());
         table.getColumn(COL_NODE_PROFILE).setCellRenderer(new NodeProfileCellRenderer());
+        table.getColumn(COL_SQLITE_PROFILE).setCellRenderer(new SQLiteProfileCellRenderer());
+        table.getColumn(COL_DETAILS).setCellRenderer(new DetailsCellRenderer());
+        table.getColumn(COL_DETAILS).setPreferredWidth(40);
+        table.setRowHeight(28);
+
         model.addTableModelListener(event -> {
             if (event.getType() == javax.swing.event.TableModelEvent.UPDATE
                     && event.getColumn() == 1
                     && event.getFirstRow() >= 0
                     && event.getFirstRow() < model.getRowCount()) {
-                updateDatabaseFileCell(event.getFirstRow());
+                table.repaint();
             }
-            table.repaint();
         });
 
         JScrollPane scroll = new JScrollPane(table);
         scroll.setBorder(BorderFactory.createTitledBorder("SQLite database profile assignments"));
         add(scroll, BorderLayout.CENTER);
 
+        // --- Action buttons (SOUTH) ---
         JButton delete = iconButton(FontAwesome.TRASH_O, "Remove the selected SQLite profile assignment");
         delete.addActionListener(event -> removeSelectedAssignment());
         JButton refresh = iconButton(FontAwesome.REFRESH, "Reload node profiles and assignments from disk");
@@ -105,7 +136,24 @@ final class SQLiteDatabaseAssignmentPanel extends JPanel {
         actions.add(apply);
         add(actions, BorderLayout.SOUTH);
 
+        // Search filtering
+        searchMatchPanel.setSearchTextListener(text -> filterTable(text));
+        searchMatchPanel.setEnterListener(() -> { });
+
         refresh();
+    }
+
+    private void filterTable(String text) {
+        String query = text == null ? "" : text.toLowerCase().trim();
+        for (int row = 0; row < model.getRowCount(); row++) {
+            String nodeProfile = String.valueOf(model.getValueAt(row, 0));
+            String sqliteProfile = String.valueOf(model.getValueAt(row, 1));
+            boolean match = query.isEmpty()
+                    || nodeProfile.toLowerCase().contains(query)
+                    || sqliteProfile.toLowerCase().contains(query);
+            table.setRowHeight(row, match ? 28 : 1);
+        }
+        table.repaint();
     }
 
     private static JButton iconButton(FontAwesome glyph, String tooltip) {
@@ -117,7 +165,7 @@ final class SQLiteDatabaseAssignmentPanel extends JPanel {
         return button;
     }
 
-    private void refresh() {
+    void refresh() {
         model.setRowCount(0);
         options.clear();
         options.add(DEFAULT);
@@ -127,8 +175,9 @@ final class SQLiteDatabaseAssignmentPanel extends JPanel {
             NodeProfile profile = NodeProfileRepository.loadProfile(confRoot, name);
             String url = profile == null ? null : profile.getProperties().getProperty(Props.DB_URL.getName());
             String assignment = assignedProfile(url);
-            model.addRow(new Object[] {name, assignment,
-                    CUSTOM.equals(assignment) ? databaseFilePath(url) : ""});
+            String nodePath = "Node/" + name;
+            String sqlitePath = toDisplayPath(assignment);
+            model.addRow(new Object[] {nodePath, sqlitePath, ""});
         }
         snapshotBaseline();
     }
@@ -149,6 +198,29 @@ final class SQLiteDatabaseAssignmentPanel extends JPanel {
             }
         }
         return false;
+    }
+
+    /**
+     * Converts a raw assignment value to its full module path display form.
+     */
+    static String toDisplayPath(String assignment) {
+        if (DEFAULT.equals(assignment) || CUSTOM.equals(assignment)) {
+            return assignment;
+        }
+        return "SQLite/" + assignment;
+    }
+
+    /**
+     * Extracts the raw profile name from a display path.
+     */
+    static String fromDisplayPath(String display) {
+        if (display == null) {
+            return "";
+        }
+        if (display.startsWith("SQLite/")) {
+            return display.substring("SQLite/".length());
+        }
+        return display;
     }
 
     static String assignedProfile(String url) {
@@ -267,30 +339,19 @@ final class SQLiteDatabaseAssignmentPanel extends JPanel {
         if (row < 0 || row >= model.getRowCount()) {
             return false;
         }
-        String name = String.valueOf(model.getValueAt(row, 0));
+        String nodeProfile = String.valueOf(model.getValueAt(row, 0));
+        String rawName = nodeProfile.startsWith("Node/") ? nodeProfile.substring("Node/".length()) : nodeProfile;
         String value = String.valueOf(model.getValueAt(row, 1));
-        return !value.equals(baseline.getOrDefault(name, ""));
+        return !value.equals(baseline.getOrDefault(rawName, ""));
     }
 
     private void snapshotBaseline() {
         baseline.clear();
         for (int row = 0; row < model.getRowCount(); row++) {
-            baseline.put(String.valueOf(model.getValueAt(row, 0)),
-                    String.valueOf(model.getValueAt(row, 1)));
+            String nodeProfile = String.valueOf(model.getValueAt(row, 0));
+            String rawName = nodeProfile.startsWith("Node/") ? nodeProfile.substring("Node/".length()) : nodeProfile;
+            baseline.put(rawName, String.valueOf(model.getValueAt(row, 1)));
         }
-    }
-
-    private void updateDatabaseFileCell(int row) {
-        String nodeProfile = String.valueOf(model.getValueAt(row, 0));
-        String assignment = String.valueOf(model.getValueAt(row, 1));
-        String path = "";
-        if (CUSTOM.equals(assignment)) {
-            NodeProfile profile = NodeProfileRepository.loadProfile(confRoot, nodeProfile);
-            String url = profile == null ? null
-                    : profile.getProperties().getProperty(Props.DB_URL.getName());
-            path = databaseFilePath(url);
-        }
-        model.setValueAt(path, row, 2);
     }
 
     private void removeSelectedAssignment() {
@@ -313,14 +374,15 @@ final class SQLiteDatabaseAssignmentPanel extends JPanel {
                 continue;
             }
             String nodeProfile = String.valueOf(model.getValueAt(row, 0));
-            String assignment = String.valueOf(model.getValueAt(row, 1));
+            String rawName = nodeProfile.startsWith("Node/") ? nodeProfile.substring("Node/".length()) : nodeProfile;
+            String assignment = fromDisplayPath(String.valueOf(model.getValueAt(row, 1)));
             try {
-                saveAssignment(nodeProfile, assignment);
-                changed.add(nodeProfile);
-                baseline.put(nodeProfile, assignment);
+                saveAssignment(rawName, assignment);
+                changed.add(rawName);
+                baseline.put(rawName, String.valueOf(model.getValueAt(row, 1)));
             } catch (IOException | IllegalArgumentException e) {
                 JOptionPane.showMessageDialog(this,
-                        "Failed to save the SQLite assignment for '" + nodeProfile + "': " + e.getMessage(),
+                        "Failed to save the SQLite assignment for '" + rawName + "': " + e.getMessage(),
                         "Error", JOptionPane.ERROR_MESSAGE);
                 return;
             }
@@ -388,6 +450,64 @@ final class SQLiteDatabaseAssignmentPanel extends JPanel {
         return new SQLiteProfile(profileName).getDbUrl();
     }
 
+    // --- Details popup ---
+
+    private void showDetailsDialog(int row) {
+        String nodeDisplay = String.valueOf(model.getValueAt(row, 0));
+        String sqliteDisplay = String.valueOf(model.getValueAt(row, 1));
+        String rawNodeName = nodeDisplay.startsWith("Node/") ? nodeDisplay.substring("Node/".length()) : nodeDisplay;
+
+        NodeProfile profile = NodeProfileRepository.loadProfile(confRoot, rawNodeName);
+        String url = profile == null ? null : profile.getProperties().getProperty(Props.DB_URL.getName());
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("<html><body style='width: 420px'>");
+        sb.append("<b>Node Profile:</b> ").append(escapeHtml(nodeDisplay)).append("<br>");
+        sb.append("<b>SQLite Profile:</b> ").append(escapeHtml(sqliteDisplay)).append("<br>");
+        sb.append("<b>DB URL:</b> ").append(escapeHtml(url == null || url.isBlank() ? "(none)" : url)).append("<br>");
+
+        if (url != null && !url.isBlank()) {
+            String filePath = databaseFilePath(url);
+            sb.append("<b>Database File:</b> ").append(escapeHtml(filePath)).append("<br>");
+            SqliteDatabasePaths.SqliteUrlParts parts = SqliteDatabasePaths.splitUrl(url);
+            if (parts != null) {
+                Path profileFile = parts.dir().resolve("profile.json");
+                if (Files.isRegularFile(profileFile)) {
+                    try (Reader reader = Files.newBufferedReader(profileFile)) {
+                        com.google.gson.JsonObject json =
+                                com.google.gson.JsonParser.parseReader(reader).getAsJsonObject();
+                        if (json.has(SQLiteProfile.CFG_JOURNAL_MODE)) {
+                            sb.append("<b>Journal Mode:</b> ")
+                                    .append(escapeHtml(json.get(SQLiteProfile.CFG_JOURNAL_MODE).getAsString())).append("<br>");
+                        }
+                        if (json.has(SQLiteProfile.CFG_CACHE_SIZE)) {
+                            sb.append("<b>Cache Size:</b> ")
+                                    .append(escapeHtml(json.get(SQLiteProfile.CFG_CACHE_SIZE).getAsString())).append("<br>");
+                        }
+                    } catch (IOException ignored) {
+                    }
+                }
+            }
+        }
+        sb.append("</body></html>");
+
+        JDialog dialog = new JDialog(null, "Assignment Details", Dialog.ModalityType.APPLICATION_MODAL);
+        JPanel content = new JPanel(new MigLayout("wrap, gap 8", "[grow]"));
+        content.setBorder(BorderFactory.createEmptyBorder(16, 16, 16, 16));
+        content.add(new JLabel(sb.toString()), "growx");
+        dialog.setContentPane(content);
+        dialog.pack();
+        dialog.setLocationRelativeTo(this);
+        dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+        dialog.setVisible(true);
+    }
+
+    private static String escapeHtml(String s) {
+        return s == null ? "" : s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
+    // --- Cell renderers ---
+
     private final class NodeProfileCellRenderer extends DefaultTableCellRenderer {
         @Override
         public Component getTableCellRendererComponent(JTable source, Object value,
@@ -395,9 +515,37 @@ final class SQLiteDatabaseAssignmentPanel extends JPanel {
             super.getTableCellRendererComponent(source, value, selected, focus, row, column);
             String text = value == null ? "" : value.toString();
             boolean unsaved = !selected && isUnsaved(row);
-            setText(unsaved ? text + " *" : text);
             setForeground(selected ? source.getSelectionForeground()
-                    : unsaved ? GuiColors.getUnsaved() : GuiColors.getApplied());
+                    : unsaved ? GuiColors.getUnsaved() : GuiColors.getSaved());
+            setText(text);
+            return this;
+        }
+    }
+
+    private final class SQLiteProfileCellRenderer extends DefaultTableCellRenderer {
+        @Override
+        public Component getTableCellRendererComponent(JTable source, Object value,
+                boolean selected, boolean focus, int row, int column) {
+            super.getTableCellRendererComponent(source, value, selected, focus, row, column);
+            String text = value == null ? "" : value.toString();
+            boolean unsaved = !selected && isUnsaved(row);
+            setForeground(selected ? source.getSelectionForeground()
+                    : unsaved ? GuiColors.getUnsaved() : GuiColors.getSaved());
+            setText(text);
+            return this;
+        }
+    }
+
+    private final class DetailsCellRenderer extends DefaultTableCellRenderer {
+        @Override
+        public Component getTableCellRendererComponent(JTable source, Object value,
+                boolean selected, boolean focus, int row, int column) {
+            setOpaque(false);
+            setText("\u24D8");
+            setToolTipText("Show assignment details");
+            setFont(getFont().deriveFont(Font.BOLD));
+            setHorizontalAlignment(CENTER);
+            setForeground(selected ? source.getSelectionForeground() : GuiColors.getButtonIcon());
             return this;
         }
     }
@@ -410,7 +558,7 @@ final class SQLiteDatabaseAssignmentPanel extends JPanel {
                 boolean selected, int row, int column) {
             combo.removeAllItems();
             for (String option : options) {
-                combo.addItem(option);
+                combo.addItem(toDisplayPath(option));
             }
             if (CUSTOM.equals(value) && !options.contains(CUSTOM)) {
                 combo.addItem(CUSTOM);

@@ -12,6 +12,7 @@ import application.module.node.props.Props;
 import application.module.node.util.Listener;
 import application.utils.gui.CustomDrawingComponent;
 import application.utils.gui.CustomDrawings;
+import application.utils.gui.DialogUtils;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiFontManager;
@@ -702,12 +703,12 @@ public class NodeToolbar extends JPanel {
 
         if (state == Signum.State.RUNNING || false) {
             // Currently running/paused -> stop
-            int result = JOptionPane.showConfirmDialog(
-                    this,
-                    "This will stop the node for profile '" + profile.getName() + "'. Continue?",
+            int result = DialogUtils.confirm(
+                    SwingUtilities.getWindowAncestor(this),
+                    DialogUtils.actionIcon(FontAwesome.POWER_OFF, GuiColors.getButtonIcon()),
                     "Stop Node",
-                    JOptionPane.YES_NO_OPTION,
-                    JOptionPane.WARNING_MESSAGE
+                    "This will stop the node for profile '" + profile.getName() + "'. Continue?",
+                    JOptionPane.YES_NO_OPTION, null, null
             );
             if (result == JOptionPane.YES_OPTION) {
                 // Single lifecycle entry point (v4): NodeModule stops this profile's node.

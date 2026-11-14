@@ -19,6 +19,7 @@ import application.utils.gui.HelpButton;
 import application.utils.gui.LeftFlowLayout;
 import application.utils.gui.NewProfileChoiceDialog;
 import application.utils.gui.ResponsiveToolbarScrollPane;
+import application.utils.gui.SearchMatchPanel;
 import application.utils.io.PathUtils;
 
 import com.google.gson.JsonObject;
@@ -42,8 +43,10 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
 import application.module.node.NodeModule;
 
@@ -74,17 +77,16 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
     private String activeProfileName = "";
 
     private JComboBox<String> profileComboBox;
-    private JButton newProfileBtn, renameProfileBtn, deleteProfileBtn, reloadProfileBtn, refreshProfilesBtn;
-    private JButton saveProfileBtn;
+    private JButton newProfileBtn, renameProfileBtn, deleteProfileBtn, refreshProfilesBtn;
+    private JButton saveProfileBtn, resetToDefaultBtn;
     private JLabel pathLabel;
     private JPanel searchResultsPanel;
     private JPanel settingsContentPanel;
+    private SearchMatchPanel searchMatchPanel;
     private JTextField searchField;
     private CheckboxGroupPanel showValuesPanel;
     private JCheckBox showUnsavedBox;
-    private JCheckBox showUnsavedAppliedBox;
     private JCheckBox showSavedBox;
-    private JCheckBox showSavedAppliedBox;
     private JComboBox<String> storageTypeCombo;
     private DatabaseFileListEditor databaseFileEditor;
     private Path databaseDirectory;
@@ -140,13 +142,16 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
         saveProfileBtn.addActionListener(e -> saveConfigurationToProfile());
         toolbarRow.add(saveProfileBtn);
 
-        reloadProfileBtn = new JButton();
-        reloadProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip("Reload Profile"));
-        reloadProfileBtn.addActionListener(e -> reloadProfile());
-        toolbarRow.add(reloadProfileBtn);
+        resetToDefaultBtn = new JButton();
+        resetToDefaultBtn.setToolTipText(ConfigurationUtils.profileTooltip(
+                "Reset to Defaults<br><br>Copies the hardcoded default values into the current editor "
+                        + "(unsaved). Press Save to persist."));
+        resetToDefaultBtn.addActionListener(e -> resetToDefaults());
+        toolbarRow.add(resetToDefaultBtn);
 
         refreshProfilesBtn = new JButton();
-        refreshProfilesBtn.setToolTipText(ConfigurationUtils.profileTooltip("Refresh Profiles"));
+        refreshProfilesBtn.setToolTipText(ConfigurationUtils.profileTooltip(
+                "Refresh Profiles<br><br>Re-scans profiles on disk and reloads the selected profile."));
         refreshProfilesBtn.addActionListener(e -> refreshProfileList());
         toolbarRow.add(refreshProfilesBtn);
 
@@ -169,12 +174,14 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
         // One glyph per action, sized / spaced / wrapped exactly like the module
         // logging panel's profile toolbar (the shared profile-action icon catalog).
         ConfigurationUtils.configureProfileToolbar(newProfileBtn, saveProfileBtn, null,
-                renameProfileBtn, deleteProfileBtn, reloadProfileBtn, refreshProfilesBtn, null, null, null);
+                renameProfileBtn, deleteProfileBtn, null, refreshProfilesBtn, resetToDefaultBtn, null, null);
 
         JScrollPane profileScroll = ConfigurationUtils.wrapProfileToolbarRow(toolbarRow);
 
-        // --- Search row: [Show values filter] [search box] (the logging pattern) ---
-        searchField = ConfigurationUtils.createSearchField("Search property, label or value...");
+        // --- Search row: [Show values filter] [SearchMatchPanel] (SSOT: same as Node panel) ---
+        searchMatchPanel = new SearchMatchPanel(
+                "Search by property name, label or value");
+        searchField = searchMatchPanel.getSearchField();
         searchField.getDocument().addDocumentListener(new DocumentListener() {
             public void insertUpdate(DocumentEvent e) {
                 filterProperties(searchField.getText());
@@ -188,27 +195,21 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
                 filterProperties(searchField.getText());
             }
         });
-        JPanel searchBox = new JPanel(new BorderLayout());
-        searchBox.setOpaque(false);
-        searchBox.setBorder(new TitledBorder("Search"));
-        searchBox.add(searchField, BorderLayout.CENTER);
 
         showValuesPanel = new CheckboxGroupPanel("Show values");
         showValuesPanel.setChangeListener(button -> filterProperties(searchField.getText()));
         showUnsavedBox = showValuesPanel.addCheckbox("Unsaved", GuiColors.getUnsaved(), true);
-        showUnsavedAppliedBox = showValuesPanel.addCheckbox("Unsaved Applied", GuiColors.getUnsavedApplied(), true);
         showSavedBox = showValuesPanel.addCheckbox("Saved", GuiColors.getSaved(), true);
-        showSavedAppliedBox = showValuesPanel.addCheckbox("Saved Applied", GuiColors.getApplied(), true);
 
-        // The same responsive toolbar scroll wrapper the logging search row uses:
-        // a left-flow strip of height-unified boxes, 10px left / 5px right margin
-        // and a 4px top/bottom border (a horizontal scrollbar appears on narrow
-        // windows instead of the row wrapping).
-        JPanel searchStrip = new JPanel(new LeftFlowLayout(ConfigurationUtils.INPUT_ACTION_GAP));
+        // The same responsive toolbar scroll wrapper the node/logging panels use:
+        // a left-flow strip of height-unified boxes, 10px left / 5px right margin,
+        // 4px strut between boxes, 4px top/bottom border.
+        JPanel searchStrip = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
         searchStrip.setOpaque(false);
         searchStrip.add(showValuesPanel);
-        searchStrip.add(searchBox);
-        ConfigurationUtils.unifyTitledBoxHeights(showValuesPanel, searchBox);
+        searchStrip.add(Box.createHorizontalStrut(ConfigurationUtils.INPUT_ACTION_GAP));
+        searchStrip.add(searchMatchPanel);
+        ConfigurationUtils.unifyTitledBoxHeights(showValuesPanel, searchMatchPanel);
         JScrollPane searchRowScroll = new ResponsiveToolbarScrollPane(searchStrip, new Insets(0, 10, 0, 5), false);
         searchRowScroll.setBorder(new EmptyBorder(4, 0, 4, 0));
         JPanel searchRow = new JPanel(new BorderLayout());
@@ -227,7 +228,9 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
         contentCardLayout = new CardLayout();
         contentContainer = new JPanel(contentCardLayout);
 
-        settingsContentPanel = new JPanel(new MigLayout("fillx, insets 10, gap 10", "[][grow]"));
+        settingsContentPanel = new JPanel(new MigLayout(
+                ConfigurationUtils.PROPERTY_PANEL_LAYOUT,
+                ConfigurationUtils.PROPERTY_PANEL_COLUMNS));
         JScrollPane settingsScroll = new JScrollPane(settingsContentPanel);
         settingsScroll.setBorder(BorderFactory.createEmptyBorder());
         contentContainer.add(settingsScroll, "SETTINGS");
@@ -298,7 +301,7 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
         propertyComponents.clear();
         valueSuppliers.clear();
 
-        addSectionHeader(settingsContentPanel, "Database File Configuration", true);
+        addSectionHeader(settingsContentPanel, "Database Storage Configuration", true);
 
         // Parse existing URL: jdbc:sqlite:file:../database/SQLite/{profile}/signum.sqlite.db
         String fullUrl = currentProfile.getDbUrl();
@@ -336,34 +339,76 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
         // from DB.URL, so updateColor colors it together with the file list.)
         settingsContentPanel.add(new JLabel("Storage Type:"), "align label");
         settingsContentPanel.add(storageTypeCombo, "growx, split 2");
-        settingsContentPanel.add(new HelpButton(), "gapleft " + ConfigurationUtils.INPUT_ACTION_GAP + ", wrap");
+        HelpButton storageTypeHelp = new HelpButton();
+        storageTypeHelp.addActionListener(e -> JOptionPane.showMessageDialog(this,
+                "Determines where the SQLite database is stored.\n\n"
+                        + "<b>file:</b> The database is stored in a file on disk (persistent).\n"
+                        + "<b>memory:</b> The database is kept in RAM and is lost when the node stops.\n\n"
+                        + "For most use cases, 'file:' is the correct choice.",
+                "Storage Type", JOptionPane.INFORMATION_MESSAGE));
+        settingsContentPanel.add(storageTypeHelp, "gapleft " + ConfigurationUtils.INPUT_ACTION_GAP + ", wrap");
         settingsContentPanel.add(new JSeparator(), ConfigurationUtils.PROPERTY_SEPARATOR_CONSTRAINTS);
 
         // The "Database File" field is an EXPANDABLE list (the node configuration
         // list editors' pattern): every database file is a row with a trash icon
         // and a flat "+" adds a new one. The FIRST file is the active database
-        // (DB.Url is composed from it); the full list is persisted to DB.Files.
+        // (DB.Url is composed from it); the file list is discovered from disk.
         databaseFileEditor = new DatabaseFileListEditor();
         databaseFileEditor.setCandidates(refreshDatabaseFileCandidates(fileName));
-        databaseFileEditor.setItems(loadDatabaseFileList(fileName));
+        List<String> discoveredFiles = loadDatabaseFileList(fileName);
+        databaseFileEditor.setItemsWithProtected(discoveredFiles, new java.util.HashSet<>(discoveredFiles));
         databaseFileEditor.onChange = () -> propertyChanged(databaseFileEditor, SQLiteProfile.CFG_URL);
+        databaseFileEditor.removeConfirmation = this::confirmDatabaseFileDeletion;
+        databaseFileEditor.helpAction = () -> JOptionPane.showMessageDialog(this,
+                "This list contains all database files for this SQLite profile.\n\n"
+                        + "<b>First file</b>: The active database (used for DB.Url).\n"
+                        + "<b>Trash icon</b>: Removes a file from the list. Files that exist on disk cannot be removed here — delete them from the file system.\n"
+                        + "<b>+</b>: Add a new database file (the .db extension is appended automatically).\n\n"
+                        + "Newly added files are created on disk only when you press Save.",
+                "Database File", JOptionPane.INFORMATION_MESSAGE);
         addDatabaseFileProperty();
+
+        // --- SQLite Configuration section ---
+        addSectionHeader(settingsContentPanel, "SQLite Configuration", false);
 
         JComboBox<String> journalMode = editableCombo(
                 new String[] { "DELETE", "TRUNCATE", "PERSIST", "MEMORY", "WAL", "OFF" },
                 currentProfile.getConfiguration().getOrDefault(SQLiteProfile.CFG_JOURNAL_MODE, "WAL"));
         addProperty(settingsContentPanel, SQLiteProfile.CFG_JOURNAL_MODE, "SQLite Journal Mode", journalMode,
                 () -> comboEditorText(journalMode));
+        setHelpAction(allPropertyRows, SQLiteProfile.CFG_JOURNAL_MODE,
+                "Controls how SQLite manages its rollback journal.\n\n"
+                        + "<b>WAL</b> (Write-Ahead Logging) — recommended: allows concurrent reads and writes, better performance.\n"
+                        + "<b>DELETE</b> — the default journal mode; the journal file is deleted after each transaction.\n"
+                        + "<b>TRUNCATE</b> — the journal file is truncated to zero length after each transaction.\n"
+                        + "<b>PERSIST</b> — the journal file is left on disk but not deleted.\n"
+                        + "<b>MEMORY</b> — the journal is kept in RAM (not persistent across crashes).\n"
+                        + "<b>OFF</b> — journaling disabled (NOT recommended; risk of corruption on crash).");
 
         JComboBox<String> cacheSize = editableCombo(
                 new String[] { "-131072", "-65536", "-32768", "-16384", "-8192", "-4096", "0" },
                 currentProfile.getConfiguration().getOrDefault(SQLiteProfile.CFG_CACHE_SIZE, "-131072"));
         addProperty(settingsContentPanel, SQLiteProfile.CFG_CACHE_SIZE, "SQLite Cache Size", cacheSize,
                 () -> comboEditorText(cacheSize));
+        setHelpAction(allPropertyRows, SQLiteProfile.CFG_CACHE_SIZE,
+                "Sets the size of the SQLite page cache in pages.\n\n"
+                        + "Negative values are multiplied by 1024 (KiB):\n"
+                        + "  -131072 → 128 MiB (default)\n"
+                        + "  -65536  → 64 MiB\n"
+                        + "  -32768  → 32 MiB\n"
+                        + "  -16384  → 16 MiB\n"
+                        + "  -8192   → 8 MiB\n"
+                        + "  -4096   → 4 MiB\n"
+                        + "  0       → system default\n\n"
+                        + "A larger cache improves read performance for frequently accessed data but uses more memory.");
 
         valueSuppliers.put(SQLiteProfile.CFG_URL, this::databaseUrlFromControls);
-        valueSuppliers.put(SQLiteProfile.CFG_FILES, this::databaseFilesValue);
-        storageTypeCombo.addActionListener(e -> propertyChanged(databaseFileEditor, SQLiteProfile.CFG_URL));
+        storageTypeCombo.addActionListener(e -> {
+            propertyChanged(databaseFileEditor, SQLiteProfile.CFG_URL);
+            updateDatabaseFileVisibility();
+        });
+        // Initial visibility: hide the file list when memory: is selected.
+        updateDatabaseFileVisibility();
 
         settingsContentPanel.revalidate();
         settingsContentPanel.repaint();
@@ -403,25 +448,100 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
      * list reads as saved (not unsaved).
      */
     private List<String> loadDatabaseFileList(String activeFile) {
-        String stored = currentProfile.getConfiguration().get(SQLiteProfile.CFG_FILES);
+        // Discover database files from the profile directory (*.db files only —
+        // not .db-wal, .db-shm, .db-journal). The filesystem is the source of
+        // truth for the file list; no DB.Files field in the JSON.
+        Path dir = getProfilePath(loadedProfileName);
         List<String> files = new ArrayList<>();
-        if (stored != null) {
-            for (String line : stored.split("\\R")) {
-                if (!line.trim().isEmpty()) {
-                    files.add(line.trim());
-                }
+        if (Files.isDirectory(dir)) {
+            try (var stream = Files.list(dir)) {
+                stream.filter(f -> {
+                    String name = f.getFileName().toString();
+                    return name.endsWith(".db")
+                            && !name.endsWith(".db-wal")
+                            && !name.endsWith(".db-shm")
+                            && !name.endsWith(".db-journal");
+                })
+                        .sorted()
+                        .forEach(f -> files.add(f.getFileName().toString()));
+            } catch (Exception e) {
+                logger.error("Failed to scan profile directory for .db files: {}", dir, e);
             }
         }
+        // Fallback: if the directory has no .db files but the URL references one,
+        // show it (the file might not exist yet on disk).
         if (files.isEmpty() && activeFile != null && !activeFile.isBlank()) {
             files.add(activeFile);
-            currentProfile.getConfiguration().put(SQLiteProfile.CFG_FILES, activeFile);
         }
         return files;
     }
 
-    /** The database-file list's editor value: the current file names, newline-joined. */
-    private String databaseFilesValue() {
-        return String.join("\n", databaseFileEditor == null ? List.of() : databaseFileEditor.getItems());
+    /**
+     * Two-step confirmation for permanent database file deletion. The first
+     * dialog warns that the file will be removed; the second emphasizes that
+     * ALL associated files (WAL, SHM, journal) will be permanently deleted and
+     * the operation is IRREVERSIBLE. Only when the user confirms BOTH does the
+     * deletion proceed (the file + related files are removed from disk).
+     *
+     * @param fileName the {@code .db} file name being removed
+     * @return true if the user confirmed both dialogs (proceed with deletion),
+     *         false otherwise (abort)
+     */
+    private boolean confirmDatabaseFileDeletion(String fileName) {
+        // Step 1: initial warning
+        int r1 = JOptionPane.showConfirmDialog(this,
+                "Are you sure you want to remove the database file '" + fileName + "' from this profile?\n\n"
+                        + "This will delete the database file and all its associated data.",
+                "Remove Database File",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
+        if (r1 != JOptionPane.OK_OPTION) {
+            return false;
+        }
+        // Step 2: permanent, irreversible confirmation
+        String relatedFiles = listRelatedDbFiles(fileName);
+        int r2 = JOptionPane.showConfirmDialog(this,
+                "⚠ PERMANENT AND IRREVERSIBLE ⚠\n\n"
+                        + "The following files will be DELETED from disk:\n\n"
+                        + relatedFiles + "\n\n"
+                        + "This operation CANNOT be undone. All data in the database will be LOST.\n\n"
+                        + "Do you want to proceed?",
+                "Confirm Permanent Deletion",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.ERROR_MESSAGE);
+        if (r2 != JOptionPane.OK_OPTION) {
+            return false;
+        }
+        // Proceed: delete the .db file and all related files from disk.
+        deleteDatabaseFilesFromDisk(fileName);
+        return true;
+    }
+
+    private String listRelatedDbFiles(String fileName) {
+        Path dir = getProfilePath(loadedProfileName);
+        StringBuilder sb = new StringBuilder();
+        String[] suffixes = {"", "-wal", "-shm", "-journal"};
+        for (String suffix : suffixes) {
+            Path p = dir.resolve(fileName + suffix);
+            if (Files.exists(p)) {
+                sb.append("  • ").append(p.getFileName()).append("\n");
+            }
+        }
+        if (sb.isEmpty()) {
+            sb.append("  • ").append(fileName).append(" (not yet on disk)\n");
+        }
+        return sb.toString();
+    }
+
+    private void deleteDatabaseFilesFromDisk(String fileName) {
+        Path dir = getProfilePath(loadedProfileName);
+        String[] suffixes = {"", "-wal", "-shm", "-journal"};
+        for (String suffix : suffixes) {
+            Path p = dir.resolve(fileName + suffix);
+            try {
+                Files.deleteIfExists(p);
+            } catch (Exception e) {
+                logger.error("Failed to delete database file: {}", p, e);
+            }
+        }
     }
 
     private void addDatabaseFileProperty() {
@@ -441,15 +561,13 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
         // "Database File" label sits on the FIRST row (level with the first
         // file's trash icon) instead of floating in the vertical middle.
         settingsContentPanel.add(label, "align label, aligny top");
-        settingsContentPanel.add(inputColumn, "growx, split 2");
-        HelpButton help = new HelpButton();
-        // The help ("?") sits a uniform INPUT_ACTION_GAP from the list (the SAME
-        // gap the node configuration list editors use for their help icon) and
-        // is TOP-aligned: the list spans several rows, so the "?" lines up with
-        // the FIRST row's trash icon instead of floating in the vertical middle
-        // of the list.
-        settingsContentPanel.add(help,
-                "gapleft " + ConfigurationUtils.INPUT_ACTION_GAP + ", aligny top, wrap");
+        settingsContentPanel.add(inputColumn, "growx, wrap");
+        // The help ("?") is now INSIDE the list editor (on the first item row),
+        // matching the Node panel's ListEditor pattern. No separate section-level
+        // help button is needed.
+        databaseFileEditor.helpAction = () -> JOptionPane.showMessageDialog(this,
+                "The database files for this SQLite profile.\nThe first file is the active database.",
+                "Database File", JOptionPane.INFORMATION_MESSAGE);
         // The row separator — the SAME trailing JSeparator the node configuration
         // panel puts between its properties (the shared central constraint).
         row.separator = new JSeparator();
@@ -457,10 +575,10 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
         settingsContentPanel.add(row.separator, row.separatorConstraints);
         row.label = label;
         row.input = inputColumn;
-        row.help = help;
+        row.help = null;
         row.labelConstraints = "align label, aligny top";
-        row.inputConstraints = "growx, split 2";
-        row.helpConstraints = "gapleft " + ConfigurationUtils.INPUT_ACTION_GAP + ", aligny top, wrap";
+        row.inputConstraints = "growx, wrap";
+        row.helpConstraints = null;
         allPropertyRows.add(row);
     }
 
@@ -527,16 +645,61 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
         }
     }
 
+    /**
+     * Sets a left-click info dialog on the HelpButton of the property row with
+     * the given key (the row must already be in {@code allPropertyRows}).
+     *
+     * @param rows the property rows list
+     * @param key  the property key to locate
+     * @param message the HTML-capable info message
+     */
+    private void setHelpAction(List<PropertyRow> rows, String key, String message) {
+        for (PropertyRow row : rows) {
+            if (key.equals(row.propertyKey) && row.help != null) {
+                row.help.addActionListener(e -> JOptionPane.showMessageDialog(this,
+                        message, row.labelText, JOptionPane.INFORMATION_MESSAGE));
+                return;
+            }
+        }
+    }
+
+    /**
+     * Shows or hides the database-file editor based on the selected storage type.
+     * When "memory:" is selected, the file list is irrelevant (the database lives
+     * in RAM) and is hidden to avoid confusion.
+     */
+    private void updateDatabaseFileVisibility() {
+        if (databaseFileEditor == null || storageTypeCombo == null) {
+            return;
+        }
+        boolean isMemory = "memory:".equals(storageTypeCombo.getSelectedItem());
+        // The database-file property row (label + input + separator) is toggled.
+        for (PropertyRow row : allPropertyRows) {
+            if (SQLiteProfile.CFG_URL.equals(row.propertyKey)) {
+                row.label.setVisible(!isMemory);
+                row.input.setVisible(!isMemory);
+                if (row.help != null) {
+                    row.help.setVisible(!isMemory);
+                }
+                if (row.separator != null) {
+                    row.separator.setVisible(!isMemory);
+                }
+                break;
+            }
+        }
+        settingsContentPanel.revalidate();
+        settingsContentPanel.repaint();
+    }
+
     private void updateColor(JComponent comp, String key) {
         Color color = valueColor(key);
         if (SQLiteProfile.CFG_URL.equals(key)) {
-            // The database-file list colors every row's editor (the row-level
-            // analogue of the single-value inputs' state coloring), and the
-            // storage type — which supplies the URL's "file:" / "jdbc:" prefix —
-            // is colored from the SAME DB.URL state, so it stays in sync with
-            // the list it composes.
+            // The database-file list uses per-item state coloring: each file row
+            // is colored by its OWN membership in the saved and applied file
+            // lists (the NodeConfigurationPanel list-editor pattern). The storage
+            // type combo is colored from the overall CFG_URL state.
             if (databaseFileEditor != null) {
-                databaseFileEditor.applyItemForeground(color);
+                databaseFileEditor.applyPerItemForegrounds(fileItemColors());
             }
             if (storageTypeCombo != null) {
                 storageTypeCombo.setForeground(color);
@@ -550,25 +713,50 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
         }
     }
 
+    /**
+     * Computes the per-item state colors for the database-file list. Each file
+     * row is colored by whether it exists on disk (SAVED) or not (UNSAVED).
+     */
+    private List<Color> fileItemColors() {
+        List<String> items = databaseFileEditor.getItems();
+        if (items.isEmpty()) {
+            return List.of();
+        }
+        // Saved baseline: the .db files that exist on disk in the profile directory.
+        Path dir = getProfilePath(loadedProfileName);
+        Set<String> savedFiles = new java.util.HashSet<>();
+        if (Files.isDirectory(dir)) {
+            try (var stream = Files.list(dir)) {
+                stream.filter(f -> {
+                    String name = f.getFileName().toString();
+                    return name.endsWith(".db")
+                            && !name.endsWith(".db-wal")
+                            && !name.endsWith(".db-shm")
+                            && !name.endsWith(".db-journal");
+                })
+                        .forEach(f -> savedFiles.add(f.getFileName().toString()));
+            } catch (Exception e) {
+                // directory not accessible; treat as empty
+            }
+        }
+        List<Color> colors = new java.util.ArrayList<>(items.size());
+        for (String file : items) {
+            colors.add(savedFiles.contains(file) ? GuiColors.getSaved() : GuiColors.getUnsaved());
+        }
+        return colors;
+    }
+
     private Color valueColor(String key) {
         return switch (valueStatus(key)) {
             case UNSAVED -> GuiColors.getUnsaved();
-            case UNSAVED_APPLIED -> GuiColors.getUnsavedApplied();
             case SAVED -> GuiColors.getSaved();
-            case SAVED_APPLIED -> GuiColors.getApplied();
         };
     }
 
     private ValueStatus valueStatus(String key) {
         String current = valueSuppliers.getOrDefault(key, () -> "").get();
         String saved = currentProfile.getConfiguration().getOrDefault(key, "");
-        String applied = appliedProfileSettings.has(key) && appliedProfileSettings.get(key).isJsonPrimitive()
-                ? appliedProfileSettings.get(key).getAsString()
-                : saved;
-        if (current.equals(saved)) {
-            return current.equals(applied) ? ValueStatus.SAVED_APPLIED : ValueStatus.SAVED;
-        }
-        return current.equals(applied) ? ValueStatus.UNSAVED_APPLIED : ValueStatus.UNSAVED;
+        return current.equals(saved) ? ValueStatus.SAVED : ValueStatus.UNSAVED;
     }
 
     private void createNewProfile() {
@@ -817,6 +1005,11 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
         if (assignmentsPanel != null) {
             assignmentsPanel.refreshIfSafe();
         }
+        // Reload the currently selected profile from disk (combined role of the
+        // former separate "Reload Profile" button).
+        if (loadedProfileName != null && profileComboBox.getSelectedItem() != null) {
+            loadProfileInternal(loadedProfileName);
+        }
         updateProfileButtonsUI();
     }
 
@@ -824,7 +1017,6 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
         boolean hasSel = profileComboBox.getSelectedItem() != null;
         renameProfileBtn.setEnabled(hasSel);
         deleteProfileBtn.setEnabled(hasSel);
-        reloadProfileBtn.setEnabled(hasSel);
         saveProfileBtn.setEnabled(hasSel);
     }
 
@@ -933,17 +1125,13 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
     private boolean isValueVisible(String key) {
         return switch (valueStatus(key)) {
             case UNSAVED -> showUnsavedBox.isSelected();
-            case UNSAVED_APPLIED -> showUnsavedAppliedBox.isSelected();
             case SAVED -> showSavedBox.isSelected();
-            case SAVED_APPLIED -> showSavedAppliedBox.isSelected();
         };
     }
 
     private enum ValueStatus {
         UNSAVED,
-        UNSAVED_APPLIED,
-        SAVED,
-        SAVED_APPLIED
+        SAVED
     }
 
     private void addSectionHeader(JPanel panel, String title, boolean isFirst) {
@@ -971,6 +1159,34 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
     public void loadProfile(String profileName, GlobalSettings gs) {
         this.globalSettings = gs;
         loadProfileInternal(profileName);
+    }
+
+    /**
+     * Resets the configuration editor values to the hardcoded application
+     * defaults (unsaved). The file list is filesystem-based and is NOT reset.
+     * After this, the values show as UNSAVED until the user saves.
+     */
+    private void resetToDefaults() {
+        if (currentProfile == null || loadedProfileName == null) {
+            return;
+        }
+        // Reset the storage type to the default ("file:").
+        if (storageTypeCombo != null) {
+            storageTypeCombo.setSelectedItem(STORAGE_TYPES[0]);
+        }
+        // Reset journal mode and cache size to their hardcoded defaults.
+        for (String key : List.of(SQLiteProfile.CFG_JOURNAL_MODE, SQLiteProfile.CFG_CACHE_SIZE)) {
+            JComponent component = propertyComponents.get(key);
+            if (component instanceof JComboBox<?> combo) {
+                String defaultVal = SQLiteProfile.DEFAULTS.getOrDefault(key, "");
+                combo.getEditor().setItem(defaultVal);
+            }
+        }
+        // Update colors and dirty status.
+        updateUIFromData();
+        if (onDirtyStatusChanged != null) {
+            onDirtyStatusChanged.run();
+        }
     }
 
     private void saveConfigurationToProfile() {
@@ -1001,7 +1217,7 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
     }
 
     private void syncControlsToProfile() {
-        for (String key : List.of(SQLiteProfile.CFG_URL, SQLiteProfile.CFG_FILES,
+        for (String key : List.of(SQLiteProfile.CFG_URL,
                 SQLiteProfile.CFG_JOURNAL_MODE,
                 SQLiteProfile.CFG_CACHE_SIZE)) {
             Supplier<String> supplier = valueSuppliers.get(key);
@@ -1060,7 +1276,7 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
         if (currentProfile == null) {
             return false;
         }
-        for (String key : List.of(SQLiteProfile.CFG_URL, SQLiteProfile.CFG_FILES,
+        for (String key : List.of(SQLiteProfile.CFG_URL,
                 SQLiteProfile.CFG_JOURNAL_MODE,
                 SQLiteProfile.CFG_CACHE_SIZE)) {
             Supplier<String> supplier = valueSuppliers.get(key);
@@ -1184,8 +1400,4 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
     }
 
     private Runnable onDirtyStatusChanged;
-
-    private void reloadProfile() {
-        loadProfileInternal(loadedProfileName);
-    }
 }

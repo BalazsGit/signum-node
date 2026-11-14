@@ -2088,6 +2088,63 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     /**
+     * Validates all managed property values against their declared types.
+     * Returns a list of human-readable error messages (empty when all values are valid).
+     */
+    private List<String> validatePropertyValues() {
+        List<String> errors = new ArrayList<>();
+        for (PropertyRow row : allPropertyRows) {
+            if (row.prop == null) continue;
+            String key = row.prop.getName();
+            Supplier<String> supplier = valueSuppliers.get(key);
+            if (supplier == null) continue;
+            String value = supplier.get();
+            if (value == null || value.isBlank()) continue; // empty = use default
+            String error = validateSingleValue(row.prop, value);
+            if (error != null) {
+                errors.add("• " + row.labelText + " (" + key + "): " + error);
+            }
+        }
+        return errors;
+    }
+
+    private String validateSingleValue(Prop<?> prop, String value) {
+        Object defaultValue = prop.getDefaultValue();
+        if (defaultValue instanceof Integer) {
+            return validateIntegerValue(value);
+        } else if (defaultValue instanceof Boolean) {
+            return validateBooleanValue(value);
+        }
+        return null; // String and other types: always valid
+    }
+
+    private String validateIntegerValue(String value) {
+        try {
+            String v = value.trim();
+            int radix = 10;
+            if (v.matches("(?i)^0x.+$")) {
+                v = v.replaceFirst("^0x", "");
+                radix = 16;
+            } else if (v.matches("(?i)^0b[01]+$")) {
+                v = v.replaceFirst("^0b", "");
+                radix = 2;
+            }
+            Integer.parseInt(v, radix);
+            return null;
+        } catch (NumberFormatException e) {
+            return "'" + value + "' is not a valid number";
+        }
+    }
+
+    private String validateBooleanValue(String value) {
+        String v = value.trim();
+        if (v.matches("(?i)^1|active|true|yes|on$") || v.matches("(?i)^0|false|no|off$")) {
+            return null;
+        }
+        return "'" + value + "' is not a valid boolean (use true/false)";
+    }
+
+    /**
      * Saves the currently loaded profile: writes the effective UI values to the
      * profile's store — the profile FILE (preserving its original format) in
      * normal mode, the virtual in-memory session profile in wizard mode — and
@@ -2097,6 +2154,20 @@ public class NodeConfigurationPanel extends JPanel {
      */
     private boolean doSaveCurrentProfile() {
         try {
+            // Validate all property values before saving
+            List<String> validationErrors = validatePropertyValues();
+            if (!validationErrors.isEmpty()) {
+                StringBuilder msg = new StringBuilder(
+                        "The following values are invalid and cannot be saved:\n\n");
+                for (String error : validationErrors) {
+                    msg.append(error).append("\n");
+                }
+                msg.append("\nPlease correct the invalid values and try again.");
+                JOptionPane.showMessageDialog(this, msg.toString(), "Invalid Configuration",
+                        JOptionPane.ERROR_MESSAGE);
+                return false;
+            }
+
             JdbcConfigurationPanel jdbcEditor = jdbcPanel();
             if (jdbcEditor != null && jdbcEditor.getValidationError() != null) {
                 JOptionPane.showMessageDialog(this, jdbcEditor.getValidationError(), "Invalid Database File",
@@ -2681,11 +2752,14 @@ public class NodeConfigurationPanel extends JPanel {
             defaultProps.setProperty(entry.getKey(), entry.getValue());
         }
         isProgrammaticChange = true;
-        updateUIFromProperties(defaultProps);
-        loadProfileLinks(loadedProfileName);
-        updateDirtyStatus();
-        refreshUIColors();
-        isProgrammaticChange = false;
+        try {
+            updateUIFromProperties(defaultProps);
+            loadProfileLinks(loadedProfileName);
+            updateDirtyStatus();
+            refreshUIColors();
+        } finally {
+            isProgrammaticChange = false;
+        }
         JOptionPane.showMessageDialog(this,
                 "All settings reset to application defaults. Remember to save if you want to keep these changes.",
                 "Reset to Defaults", JOptionPane.INFORMATION_MESSAGE);

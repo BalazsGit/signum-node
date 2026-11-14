@@ -66,6 +66,27 @@ public class ConfigurationUtils {
     public static final String PROPERTY_SEPARATOR_CONSTRAINTS = "span, growx, wrap, gaptop 2, gapbottom 2";
 
     /**
+     * THE single, shared row gap (in pixels) for configuration property panels.
+     * Used by the Node Configuration Panel and the SQLite Configuration Panel so
+     * the vertical spacing between property rows is identical everywhere.
+     */
+    public static final int PROPERTY_ROW_GAP = 5;
+
+    /**
+     * THE single, shared MigLayout layout-constraints string for configuration
+     * property content panels. Defines the insets and the uniform row/column gap.
+     * Combined with {@link #PROPERTY_PANEL_COLUMNS} for the full grid.
+     */
+    public static final String PROPERTY_PANEL_LAYOUT =
+            "fillx, insets 10, gap " + PROPERTY_ROW_GAP;
+
+    /**
+     * THE single, shared MigLayout column-constraints string for configuration
+     * property content panels: a label column (auto) plus a growing input column.
+     */
+    public static final String PROPERTY_PANEL_COLUMNS = "[][grow]";
+
+    /**
      * THE single, shared column count (preferred width) of the search field in a
      * configuration panel's search box. Read from this constant by
      * {@link #createSearchField} and the shared {@link SearchMatchPanel} so every

@@ -465,7 +465,7 @@ public class AppearancePanel extends JPanel {
     private void refreshAndReloadProfile() {
         if (hasUnsavedChanges()) {
             int result = DialogUtils.confirm(this,
-                    DialogUtils.actionIcon(FontAwesome.RECYCLE, GuiColors.getButtonIcon()),
+                    DialogUtils.actionIcon(FontAwesome.REFRESH, GuiColors.getButtonIcon()),
                     "Refresh Appearance Profiles",
                     "Refresh the profile list and reload the selected profile from disk? "
                             + "Unsaved changes will be discarded.",

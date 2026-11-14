@@ -33,6 +33,11 @@ public class SQLiteProfile {
     public static final String CFG_JOURNAL_MODE = "DB.SqliteJournalMode";
     public static final String CFG_CACHE_SIZE = "DB.SqliteCacheSize";
 
+    /** The hardcoded default values for each configurable SQLite property (L0 baseline). */
+    public static final Map<String, String> DEFAULTS = Map.of(
+            CFG_JOURNAL_MODE, "WAL",
+            CFG_CACHE_SIZE, "-131072");
+
     /**
      * The expandable list of database file names of a file-based profile (newline
      * joined, see {@code DatabaseFileListEditor}). The FIRST entry is the active

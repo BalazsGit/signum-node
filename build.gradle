@@ -415,6 +415,7 @@ def archiveBuildTimestamp = providers.provider {
 }
 
 tasks.register('dist', Zip) {
+    // Fat jar at the package root (portable path convention: no app/ subfolder).
     from(project.tasks.shadowJar.outputs.files) {
         include "${baseNodeFileName}-all.jar"
         rename { "${baseNodeFileName}.jar" }
@@ -441,6 +442,11 @@ tasks.register('dist', Zip) {
     // JCEF native distribution (plan D1/D2): jcef/<os>-<arch>/ next to the fat jar.
     dependsOn extractJcef
     from(jcefRoot) { into 'jcef' }
+    // Bundled JRE: runtime/ folder (no system Java required).
+    dependsOn unzipWindowsJRE
+    from("$buildDir/distributions/jre") { into 'runtime' }
+    // Launcher script: placed at the zip root.
+    from("run-node.bat")
     archiveFileName = "${baseNodeFileName}.zip"
     // Gradle 9 normalizes archive entry timestamps to a fixed 1980 epoch (reproducible
     // archives by default). Stamp them with the local build time instead, so the zip
@@ -575,7 +581,7 @@ def jreZipName = "${jreVersion}-win_x64.zip"
 tasks.register('downloadWindowsJRE', de.undercouch.gradle.tasks.download.Download) {
     src "https://cdn.azul.com/zulu/bin/${jreVersion}-win_x64.zip"
     dest jreZip
-    overwrite true
+    overwrite false
     doLast {
     def file = file("build/distributions/${jreZipName}")
     if (!file.exists() || file.length() < 10_000) {

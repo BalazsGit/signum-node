@@ -6,6 +6,7 @@ import application.utils.gui.FlatIconButton;
 import application.utils.gui.FlatPlusButton;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
+import application.utils.gui.HelpButton;
 import application.utils.gui.IconFontCache;
 import jiconfont.icons.font_awesome.FontAwesome;
 import net.miginfocom.swing.MigLayout;
@@ -14,6 +15,7 @@ import javax.swing.*;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.BorderLayout;
+import java.awt.Dimension;
 import java.awt.event.FocusEvent;
 import java.awt.event.FocusListener;
 import java.awt.Color;
@@ -21,6 +23,7 @@ import java.awt.Cursor;
 import java.awt.Component;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * A multi-row editor of a file-based SQLite profile's database files, modeled
@@ -57,6 +60,7 @@ public final class DatabaseFileListEditor extends JPanel {
     private final JPanel itemsPanel;
     private final JComboBox<String> addField;
     private final FlatPlusButton addButton;
+    private final HelpButton helpBtn;
     private final List<JComboBox<String>> itemFields = new ArrayList<>();
     private final int iconColumnWidth;
 
@@ -65,6 +69,31 @@ public final class DatabaseFileListEditor extends JPanel {
 
     /** Invoked on every structural change (add/remove) and item edit. */
     public Runnable onChange;
+
+    /**
+     * Optional confirmation gate for removal. When set, called before a file row
+     * is removed; if it returns {@code false}, the removal is aborted. The owning
+     * panel uses this to show a multi-step warning (permanent, irreversible).
+     *
+     * @param fileName the file name being removed
+     * @return true to proceed with removal, false to cancel
+     */
+    public java.util.function.Function<String, Boolean> removeConfirmation;
+
+    /** Invoked when the row's help ("?") button is clicked (set by the owning panel). */
+    public Runnable helpAction;
+
+    /**
+     * Files that exist on disk and must NOT be deleted from the list. The trash
+     * icon for these rows is disabled (greyed out, no action).
+     */
+    private Set<String> protectedFiles = Set.of();
+
+    /** Sets the set of file names that cannot be removed (exist on disk). */
+    public void setProtectedFiles(Set<String> files) {
+        this.protectedFiles = files == null ? Set.of() : files;
+        rebuildItems();
+    }
 
     /** Guards programmatic model swaps so the L&F's own events do not fire the hook. */
     private boolean isProgrammaticChange;
@@ -80,14 +109,15 @@ public final class DatabaseFileListEditor extends JPanel {
         trashProto.setIcon(IconFontCache.buildIcon(FontAwesome.TRASH,
                 GuiConstants.getHelpIconSize(), GuiColors.getContrastRed()));
         FlatPlusButton plusProto = new FlatPlusButton();
+        helpBtn = new HelpButton();
         iconColumnWidth = Math.max(trashProto.getPreferredSize().width,
-                plusProto.getPreferredSize().width);
+                Math.max(plusProto.getPreferredSize().width, helpBtn.getPreferredSize().width));
         int actionColumnWidth = iconColumnWidth + ConfigurationUtils.INPUT_ACTION_GAP;
 
-        // All item rows and the add row share this one grid, so layout rounding
-        // cannot move the plus away from the trash column.
+        // 3-column grid (same as Node panel ListEditor): [input][trash/+][help/spacer]
         itemsPanel = new JPanel(new MigLayout("insets 0, fillx",
-                "[grow][" + actionColumnWidth + "px, grow 0]", "[]"));
+                "[grow][" + actionColumnWidth + "px, grow 0]["
+                        + actionColumnWidth + "px, grow 0]", "[]"));
         itemsPanel.setOpaque(false);
         add(itemsPanel, BorderLayout.CENTER);
 
@@ -98,8 +128,17 @@ public final class DatabaseFileListEditor extends JPanel {
         addField.setEditable(true);
         ConfigurationUtils.styleComboEditor(addField);
         addField.setPrototypeDisplayValue("signum.sqlite.db");
-        addField.setToolTipText("Type a database file name (.db), then press '+' (or Enter) to add it");
+        addField.setToolTipText("Type a database file name, then press '+' (or Enter) to add it. The .db extension is appended automatically.");
+        installDbSuffix(addField);
         installAddEnterAction();
+
+        helpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        helpBtn.setToolTipText("Click for more info");
+        helpBtn.addActionListener(e -> {
+            if (helpAction != null) {
+                helpAction.run();
+            }
+        });
 
         addButton = new FlatPlusButton();
         addButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
@@ -161,6 +200,28 @@ public final class DatabaseFileListEditor extends JPanel {
     }
 
     /**
+     * Atomically sets both the file list and the protected (on-disk) file set,
+     * ensuring the trash-button state is correct from the first paint.
+     */
+    public void setItemsWithProtected(List<String> values, Set<String> protectedSet) {
+        this.protectedFiles = protectedSet == null ? Set.of() : protectedSet;
+        isProgrammaticChange = true;
+        try {
+            itemFields.clear();
+            if (values != null) {
+                for (String value : values) {
+                    if (value != null && !value.trim().isEmpty()) {
+                        itemFields.add(makeItemCombo(value.trim()));
+                    }
+                }
+            }
+            rebuildItems();
+        } finally {
+            isProgrammaticChange = false;
+        }
+    }
+
+    /**
      * Appends a file from the add row. No-op when the text is blank; a name that
      * is not a {@code *.db} file ({@link SqliteDatabasePaths#isDbFile(String)})
      * is rejected with an error and not added.
@@ -172,8 +233,20 @@ public final class DatabaseFileListEditor extends JPanel {
         if (value.isEmpty()) {
             return;
         }
+        // Auto-append the .db extension if the user omitted it.
+        if (!value.endsWith(".db")) {
+            value = value + ".db";
+        }
         if (!SqliteDatabasePaths.isDbFile(value)) {
             rejectInvalidName(value);
+            return;
+        }
+        // Prevent duplicates: the same database file cannot appear twice in the list.
+        String finalValue = value;
+        if (itemFields.stream().anyMatch(f -> finalValue.equals(comboText(f)))) {
+            JOptionPane.showMessageDialog(this,
+                    "The database file '" + value + "' is already in the list.",
+                    "Duplicate file", JOptionPane.WARNING_MESSAGE);
             return;
         }
         isProgrammaticChange = true;
@@ -200,9 +273,15 @@ public final class DatabaseFileListEditor extends JPanel {
 
     /** Removes one file row. No-op when the combo is not in the list. */
     public void removeItem(JComboBox<String> field) {
-        if (!itemFields.remove(field)) {
+        if (!itemFields.contains(field)) {
             return;
         }
+        String fileName = comboText(field);
+        // Gate: the owning panel may require multi-step confirmation (permanent deletion).
+        if (removeConfirmation != null && !removeConfirmation.apply(fileName)) {
+            return;
+        }
+        itemFields.remove(field);
         isProgrammaticChange = true;
         try {
             rebuildItems();
@@ -220,22 +299,123 @@ public final class DatabaseFileListEditor extends JPanel {
      */
     private void rebuildItems() {
         itemsPanel.removeAll();
-        for (JComboBox<String> combo : itemFields) {
+        for (int i = 0; i < itemFields.size(); i++) {
+            JComboBox<String> combo = itemFields.get(i);
             itemsPanel.add(combo, "growx");
             FlatIconButton removeBtn = new FlatIconButton();
-            removeBtn.setIcon(IconFontCache.buildIcon(FontAwesome.TRASH,
-                    GuiConstants.getHelpIconSize(), GuiColors.getContrastRed()));
+            String fileName = comboText(combo).trim();
+            boolean isProtected = protectedFiles.contains(fileName);
+            if (isProtected) {
+                removeBtn.setIcon(IconFontCache.buildIcon(FontAwesome.TRASH,
+                        GuiConstants.getHelpIconSize(), GuiColors.getFaintText()));
+                removeBtn.setEnabled(false);
+                removeBtn.setToolTipText("This file exists on disk and cannot be removed from the list");
+            } else {
+                removeBtn.setIcon(IconFontCache.buildIcon(FontAwesome.TRASH,
+                        GuiConstants.getHelpIconSize(), GuiColors.getContrastRed()));
+                removeBtn.setToolTipText("Remove this database file");
+                removeBtn.addActionListener(e -> removeItem(combo));
+            }
             removeBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-            removeBtn.setToolTipText("Remove this database file");
-            removeBtn.addActionListener(e -> removeItem(combo));
             itemsPanel.add(removeBtn,
-                    "gapleft " + ConfigurationUtils.INPUT_ACTION_GAP + ", w " + iconColumnWidth + "!, wrap");
+                    "gapleft " + ConfigurationUtils.INPUT_ACTION_GAP + ", w " + iconColumnWidth + "!, growx");
+            if (i == 0) {
+                itemsPanel.add(helpBtn, "gapleft " + ConfigurationUtils.INPUT_ACTION_GAP + ", wrap");
+            } else {
+                itemsPanel.add(rowColumnSpacer(), "gapleft " + ConfigurationUtils.INPUT_ACTION_GAP + ", wrap");
+            }
         }
+        // Add row: input + "+" + spacer (same 3-column pattern).
         itemsPanel.add(addField, "growx");
         itemsPanel.add(addButton,
-                "gapleft " + ConfigurationUtils.INPUT_ACTION_GAP + ", w " + iconColumnWidth + "!, wrap");
+                "gapleft " + ConfigurationUtils.INPUT_ACTION_GAP + ", w " + iconColumnWidth + "!, growx");
+        itemsPanel.add(rowColumnSpacer(), "gapleft " + ConfigurationUtils.INPUT_ACTION_GAP + ", wrap");
         itemsPanel.revalidate();
         itemsPanel.repaint();
+    }
+
+    /** Invisible 0x0 placeholder reserving the help-icon column on rows without it. */
+    private JComponent rowColumnSpacer() {
+        JPanel spacer = new JPanel(null);
+        spacer.setOpaque(false);
+        spacer.setPreferredSize(new java.awt.Dimension(0, 0));
+        return spacer;
+    }
+
+    /**
+     * Installs caret and document guards on the combo's editor so that a fixed
+     * {@code .db} suffix is always present, non-deletable, and the caret can
+     * never move into or past the suffix region. Clicking anywhere at or after
+     * the suffix snaps the caret to just before it.
+     */
+    private void installDbSuffix(JComboBox<String> combo) {
+        Component editorComp = combo.getEditor().getEditorComponent();
+        if (!(editorComp instanceof JTextField field)) {
+            return;
+        }
+        // Caret guard: never allow the caret to be at or past the ".db" start.
+        field.addCaretListener(e -> {
+            String text = field.getText();
+            if (text.endsWith(".db")) {
+                int suffixStart = text.length() - 3;
+                if (field.getCaretPosition() > suffixStart) {
+                    field.setCaretPosition(suffixStart);
+                }
+            }
+        });
+
+        // Mouse guard: immediately clamp the caret on click so the user never
+        // sees the cursor land past ".db" (avoids the visual jump).
+        field.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mousePressed(java.awt.event.MouseEvent e) {
+                clampCaretBeforeSuffix(field);
+            }
+
+            @Override
+            public void mouseReleased(java.awt.event.MouseEvent e) {
+                clampCaretBeforeSuffix(field);
+            }
+        });
+
+        // Document guard: if ".db" is removed, restore it (deferred to avoid
+        // "mutate in notification" during programmatic model swaps).
+        field.getDocument().addDocumentListener(new DocumentListener() {
+            private boolean adjusting;
+            public void insertUpdate(DocumentEvent e) { }
+            public void removeUpdate(DocumentEvent e) { scheduleEnforce(field); }
+            public void changedUpdate(DocumentEvent e) { }
+            private void scheduleEnforce(JTextField f) {
+                if (adjusting) return;
+                javax.swing.SwingUtilities.invokeLater(() -> {
+                    String text = f.getText();
+                    if (text.endsWith(".db")) return;
+                    adjusting = true;
+                    try {
+                        int pos = Math.min(f.getCaretPosition(), text.length());
+                        f.setText(text + ".db");
+                        f.setCaretPosition(Math.min(pos, text.length()));
+                    } finally {
+                        adjusting = false;
+                    }
+                });
+            }
+        });
+    }
+
+    /**
+     * Immediately clamps the caret position to just before the {@code .db} suffix
+     * (if present). Called on mouse press/release to prevent the visual flicker
+     * of the cursor landing past the suffix and then jumping back.
+     */
+    private void clampCaretBeforeSuffix(JTextField field) {
+        String text = field.getText();
+        if (text.endsWith(".db")) {
+            int suffixStart = text.length() - 3;
+            if (field.getCaretPosition() > suffixStart) {
+                field.setCaretPosition(suffixStart);
+            }
+        }
     }
 
     /**
@@ -281,7 +461,12 @@ public final class DatabaseFileListEditor extends JPanel {
             textField.addFocusListener(new FocusListener() {
                 @Override
                 public void focusGained(FocusEvent e) {
-                    textField.selectAll();
+                    String text = textField.getText();
+                    if (text.endsWith(".db")) {
+                        textField.setCaretPosition(text.length() - 3);
+                    } else {
+                        textField.selectAll();
+                    }
                 }
 
                 @Override
@@ -289,6 +474,7 @@ public final class DatabaseFileListEditor extends JPanel {
                     validateItemCombo(combo);
                 }
             });
+            installDbSuffix(combo);
         }
         return combo;
     }
@@ -391,6 +577,26 @@ public final class DatabaseFileListEditor extends JPanel {
             applyComboForeground(combo, color);
         }
         applyComboForeground(addField, color);
+    }
+
+    /**
+     * Applies a distinct foreground color to each item row (per-item state
+     * coloring). The add-field row is colored from the last item's color so it
+     * reads as part of the list.
+     *
+     * @param colors one color per item row (size must match the current item count)
+     */
+    public void applyPerItemForegrounds(List<Color> colors) {
+        if (colors == null || colors.isEmpty()) {
+            return;
+        }
+        for (int i = 0; i < itemFields.size() && i < colors.size(); i++) {
+            applyComboForeground(itemFields.get(i), colors.get(i));
+        }
+        // The add-field inherits the last item's color.
+        if (!itemFields.isEmpty()) {
+            applyComboForeground(addField, colors.get(colors.size() - 1));
+        }
     }
 
     private static void applyComboForeground(JComboBox<String> combo, Color color) {

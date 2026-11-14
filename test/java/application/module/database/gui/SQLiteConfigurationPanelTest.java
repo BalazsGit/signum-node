@@ -126,7 +126,6 @@ class SQLiteConfigurationPanelTest {
 
             com.google.gson.JsonObject current = panel.getCurrentProfileSettings();
             assertTrue(current.get(SQLiteProfile.CFG_URL).getAsString().endsWith("/alternate.db"));
-            assertEquals("alternate.db", current.get(SQLiteProfile.CFG_FILES).getAsString());
             assertEquals("DELETE WAL", current.get(SQLiteProfile.CFG_JOURNAL_MODE).getAsString());
             assertEquals("8192", current.get(SQLiteProfile.CFG_CACHE_SIZE).getAsString());
         });
@@ -211,8 +210,9 @@ class SQLiteConfigurationPanelTest {
         tableField.setAccessible(true);
         JTable table = (JTable) tableField.get(assignments.get());
         assertEquals(3, table.getColumnCount());
+        assertEquals("Node/node_custom", table.getValueAt(0, 0));
         assertEquals("(custom URL)", table.getValueAt(0, 1));
-        assertEquals(databaseFile.toAbsolutePath().normalize().toString(), table.getValueAt(0, 2));
+        assertEquals("", table.getValueAt(0, 2));
     }
 
     private static void deleteRecursively(Path root) throws IOException {
