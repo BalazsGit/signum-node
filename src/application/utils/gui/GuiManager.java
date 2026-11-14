@@ -58,6 +58,14 @@ public class GuiManager {
     // ─── Default Settings ──────────────────────────────
     static final int DEFAULT_TAB_LAYOUT_POLICY = JTabbedPane.SCROLL_TAB_LAYOUT;
 
+    /**
+     * Opacity (0-255) of the app-wide tooltip background. Kept high so the
+     * tooltip stays readable while its background blends softly with whatever
+     * is behind it (the "translucent" look); lower this to make tooltips more
+     * see-through.
+     */
+    static final int TOOLTIP_BACKGROUND_ALPHA = 230;
+
     // ─── Configurable State ────────────────────────────
     private int tabLayoutPolicy = DEFAULT_TAB_LAYOUT_POLICY;
     
@@ -96,7 +104,7 @@ public class GuiManager {
         this.settingsPath = guiSettingsPath;
         ToolTipManager.sharedInstance().setDismissDelay(120_000);
         loadFromJson(guiSettingsPath);
-        LOGGER.info("[GUI-DEBUG] GuiManager initialized. Loaded tabLayoutPolicy={}, colorOverrides={}", 
+        LOGGER.debug("[GUI-DEBUG] GuiManager initialized. Loaded tabLayoutPolicy={}, colorOverrides={}", 
                 getTabLayoutPolicyName(), colorOverrides.size());
         initialized = true;
     }
@@ -121,7 +129,7 @@ public class GuiManager {
         
         UIManager.put("TabbedPane.tabLayoutPolicy", tabLayoutPolicy);
         int actualValue = UIManager.getInt("TabbedPane.tabLayoutPolicy");
-        LOGGER.info("[GUI-DEBUG] Applied TabbedPane.tabLayoutPolicy={}. UIManager now reports: {} (SCROLL={})", 
+        LOGGER.debug("[GUI-DEBUG] Applied TabbedPane.tabLayoutPolicy={}. UIManager now reports: {} (SCROLL={})", 
                 tabLayoutPolicy, actualValue, JTabbedPane.SCROLL_TAB_LAYOUT);
         
         // The FlatLaf "reveal password" button (the eye inside every
@@ -131,7 +139,7 @@ public class GuiManager {
         // before the app's components are built — which is guaranteed by this
         // method's position in the init flow (after setLookAndFeel()).
         UIManager.put("PasswordField.showRevealButton", true);
-        LOGGER.info("[GUI-DEBUG] Applied PasswordField.showRevealButton=true");
+        LOGGER.debug("[GUI-DEBUG] Applied PasswordField.showRevealButton=true");
         
         for (Map.Entry<String, String> entry : colorOverrides.entrySet()) {
             try {
@@ -141,7 +149,27 @@ public class GuiManager {
             }
         }
         if (!colorOverrides.isEmpty()) {
-            LOGGER.info("[GUI-DEBUG] Applied {} color overrides", colorOverrides.size());
+            LOGGER.debug("[GUI-DEBUG] Applied {} color overrides", colorOverrides.size());
+        }
+        // Apply the translucent tooltip look last, so it is not clobbered by a
+        // user color override of ToolTip.background.
+        applyTranslucentToolTips();
+    }
+
+    /**
+     * Applies the app-wide translucent tooltip look: tints the active theme's
+     * {@code ToolTip.background} semi-transparent (see
+     * {@link #TOOLTIP_BACKGROUND_ALPHA}). FlatLaf paints the tooltip background
+     * with that color's alpha (source-over), so the mouse-over box blends softly
+     * with whatever is behind it. Called from {@link #applyDefaultsAfterLaf()}
+     * and re-applied on every runtime theme change (a {@code setLookAndFeel}
+     * clears all UIManager overrides).
+     */
+    public void applyTranslucentToolTips() {
+        Color background = UIManager.getColor("ToolTip.background");
+        if (background != null) {
+            UIManager.put("ToolTip.background",
+                    new Color(background.getRed(), background.getGreen(), background.getBlue(), TOOLTIP_BACKGROUND_ALPHA));
         }
     }
 

@@ -313,7 +313,7 @@ public class GuiUtils {
             caller = "unknown";
         }
         
-        LOGGER.info("[ScrollDebug] GuiUtils.scrollToBottom called from: {}", caller);
+        LOGGER.debug("[ScrollDebug] GuiUtils.scrollToBottom called from: {}", caller);
         
         SwingUtilities.invokeLater(() -> {
             JScrollBar vBar = scrollPane.getVerticalScrollBar();
@@ -321,13 +321,13 @@ public class GuiUtils {
                 int max = vBar.getMaximum();
                 int extent = vBar.getVisibleAmount();
                 int currentBefore = vBar.getValue();
-                LOGGER.info("[ScrollDebug] GuiUtils.scrollToBottom executing: max={}, extent={}, currentBefore={}, caller={}", 
+                LOGGER.debug("[ScrollDebug] GuiUtils.scrollToBottom executing: max={}, extent={}, currentBefore={}, caller={}", 
                     max, extent, currentBefore, caller);
                 vBar.setValue(vBar.getMaximum());
                 int currentAfter = vBar.getValue();
-                LOGGER.info("[ScrollDebug] GuiUtils.scrollToBottom done: currentAfter={}", currentAfter);
+                LOGGER.debug("[ScrollDebug] GuiUtils.scrollToBottom done: currentAfter={}", currentAfter);
             } else {
-                LOGGER.info("[ScrollDebug] GuiUtils.scrollToBottom: vBar=null");
+                LOGGER.debug("[ScrollDebug] GuiUtils.scrollToBottom: vBar=null");
             }
         });
     }

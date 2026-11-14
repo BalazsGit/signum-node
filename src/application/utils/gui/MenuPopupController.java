@@ -32,6 +32,8 @@ public final class MenuPopupController {
     private PopupAutoCloser autoCloser;
     private Timer animator;
     private boolean open = false;
+    /** Guards against re-entrant {@link #hide()} while a hide animation is in flight. */
+    private boolean hiding = false;
 
     public MenuPopupController(Window owner) {
         this.owner = Objects.requireNonNull(owner);
@@ -106,7 +108,14 @@ public final class MenuPopupController {
     }
 
     public void hide() {
-        if (!isOpen() || wrapper == null) return;
+        if (!isOpen() || wrapper == null || hiding) return;
+        hiding = true;
+        // Stop any in-flight show animation so it cannot race the hide and resize the
+        // same wrapper (the NPE source: two animation timers on one wrapper).
+        if (animator != null) {
+            try { animator.stop(); } catch (Exception ignore) {}
+            animator = null;
+        }
         try {
             final int startHeight = wrapper.getHeight();
             final int menuWidth = wrapper.getWidth();
@@ -116,6 +125,12 @@ public final class MenuPopupController {
             t.addActionListener(new ActionListener() {
                 @Override
                 public void actionPerformed(ActionEvent e) {
+                    // Defensive: a concurrent hide/show may already have cleaned up the wrapper.
+                    if (wrapper == null) {
+                        ((Timer) e.getSource()).stop();
+                        hiding = false;
+                        return;
+                    }
                     long elapsed = System.currentTimeMillis() - start;
                     float progress = Math.min(1.0f, (float) elapsed / duration);
                     progress = 1.0f - (float) Math.pow(1.0f - progress, 3);
@@ -141,6 +156,7 @@ public final class MenuPopupController {
                             }
                             wrapper = null;
                             open = false;
+                            hiding = false;
                         }
                     }
                 }
@@ -161,6 +177,7 @@ public final class MenuPopupController {
             } catch (Exception ignore) {}
             wrapper = null;
             open = false;
+            hiding = false;
         }
     }
 }

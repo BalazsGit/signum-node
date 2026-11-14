@@ -431,7 +431,14 @@ public final class BrowserTabPane extends JTabbedPane {
     private static final class NewTabButton extends JButton {
 
         NewTabButton() {
-            PlusGlyphIcon.installHover(this);
+            // Static glyph — no grow-on-hover: the tab strip's close "X" and the surrounding
+            // tabs don't grow, so neither does this "+" (grow-on-hover is reserved for the
+            // configuration-panel function buttons). The rounded hover highlight below still
+            // marks it as a clickable control.
+            // 11 px: the same compact size the node profile-tab "+" uses
+            // (ProfileActionIcon.NEW_PROFILE.normal(11)) — the default 16 px read as
+            // visibly larger than the close "X" (an 8 px diagonal) and the overflow chevrons.
+            setIcon(new PlusGlyphIcon(11));
             setToolTipText(I18n.get("browser.tab.new.tooltip"));
             setContentAreaFilled(false);
             setFocusPainted(false);

@@ -158,7 +158,12 @@ public final class BookmarksBar extends JPanel {
         newFolder.setBorderPainted(false);
         newFolder.setFocusPainted(false);
         newFolder.setRolloverEnabled(true);
-        PlusGlyphIcon.installHover(newFolder);
+        // Static glyph — no grow-on-hover: the bookmark chips and the tab strip don't grow, so
+        // neither does this "+" (grow-on-hover is reserved for the configuration-panel
+        // function buttons).
+        // 11 px: the same compact size the tab strip's new-tab "+" and the node
+        // profile-tab "+" use — the default 16 px read as larger than the chip text.
+        newFolder.setIcon(new PlusGlyphIcon(11));
         newFolder.setToolTipText(I18n.get("browser.bookmarks.bar.newFolder.tooltip"));
         newFolder.addActionListener(e -> createNewFolder());
         add(newFolder);

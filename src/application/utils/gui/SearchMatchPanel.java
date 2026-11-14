@@ -86,8 +86,10 @@ public final class SearchMatchPanel extends JPanel {
 
         // Live "find" input — plain text only, no extra settings. Fires on
         // every keystroke via the DocumentListener below. Styled with the
-        // FlatLaf search look (leading magnifier + placeholder).
-        searchField = new JTextField(16);
+        // FlatLaf search look (leading magnifier + placeholder). The column
+        // count (preferred width) is the shared central definition so this box
+        // matches every panel's search field — see SEARCH_FIELD_COLUMNS.
+        searchField = new JTextField(ConfigurationUtils.SEARCH_FIELD_COLUMNS);
         ConfigurationUtils.applySearchFieldStyle(searchField, "Type to search...");
         if (fieldTooltip != null) {
             searchField.setToolTipText("<html><body style='width: 360px'>"

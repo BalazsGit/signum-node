@@ -62,7 +62,12 @@ public class HelpButton extends JButton {
     }
 
     private void updateIcon() {
-        setIcon(IconFontSwing.buildIcon(FontAwesome.QUESTION_CIRCLE, GuiConstants.getHelpIconSize(),
+        // P8 (delete-repro fix): jiconfont re-creates the underlying Font from raw
+        // bytes on EVERY buildIcon call (no internal cache); ~200 HelpButtons in a
+        // single NodeConfigurationPanel therefore cost ~200 font/temp-file round-
+        // trips on the EDT. The icon is a pure function of (code, size, color), so
+        // share one built instance across all identical buttons.
+        setIcon(IconFontCache.buildIcon(FontAwesome.QUESTION_CIRCLE, GuiConstants.getHelpIconSize(),
                 GuiColors.getHelpIcon()));
     }
 

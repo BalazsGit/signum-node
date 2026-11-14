@@ -1,8 +1,5 @@
 package application.utils.gui;
 
-import jiconfont.icons.font_awesome.FontAwesome;
-import jiconfont.swing.IconFontSwing;
-
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
@@ -61,15 +58,27 @@ public final class NewProfileChoiceDialog {
      *         when the user cancelled (or closed the window)
      */
     public static Choice show(Component parent, boolean offerWizard) {
-        // Defensive icon-font registration (the app registers it at startup;
-        // this covers standalone/test construction of the parent panel).
-        IconFontSwing.register(FontAwesome.getIconFont());
+        return show(parent, offerWizard,
+                "Launch Setup Wizard",
+                "Guided step-by-step setup: choose the database, the connection and the node settings.");
+    }
 
+    /**
+     * Shows the shared choice dialog with host-specific wizard copy.
+     *
+     * @param parent        the parent component
+     * @param offerWizard   whether to include a wizard creation option
+     * @param wizardLabel   the wizard radio-option label
+     * @param wizardDetail  the wizard radio-option description
+     * @return the selected choice, or {@code null} if cancelled
+     */
+    public static Choice show(Component parent, boolean offerWizard,
+            String wizardLabel, String wizardDetail) {
         final Choice[] result = { null };
         JDialog dialog = new JDialog(ownerOf(parent), TITLE, java.awt.Dialog.ModalityType.APPLICATION_MODAL);
         dialog.setResizable(false);
         dialog.getContentPane().setLayout(new BoxLayout(dialog.getContentPane(), BoxLayout.Y_AXIS));
-        dialog.getContentPane().add(buildContent(offerWizard, result));
+        dialog.getContentPane().add(buildContent(offerWizard, wizardLabel, wizardDetail, result));
         dialog.pack();
         dialog.setLocationRelativeTo(parent);
         dialog.setVisible(true);
@@ -85,6 +94,11 @@ public final class NewProfileChoiceDialog {
      * closes the dialog; Cancel (or the window close) leaves it null.
      */
     static Component buildContent(boolean offerWizard, Choice[] result) {
+        return buildContent(offerWizard, "Launch Setup Wizard",
+                "Guided step-by-step setup: choose the database, the connection and the node settings.", result);
+    }
+
+    static Component buildContent(boolean offerWizard, String wizardLabel, String wizardDetail, Choice[] result) {
         JPanel content = new JPanel();
         content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
         content.setOpaque(false);
@@ -92,8 +106,7 @@ public final class NewProfileChoiceDialog {
 
         // Header: the large New Profile glyph (double the toolbar icon size)
         // in the corner next to the bold title.
-        Icon icon = IconFontSwing.buildIcon(FontAwesome.FILE_O, GuiConstants.getToolBarIconSize() * 2f,
-                GuiColors.getButtonIcon());
+        Icon icon = ProfileActionIcon.NEW_PROFILE.normal(GuiConstants.getToolBarIconSize() * 2f);
         JLabel iconLabel = new JLabel(icon);
         iconLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 12));
 
@@ -118,8 +131,7 @@ public final class NewProfileChoiceDialog {
         JRadioButton first = null;
         if (offerWizard) {
             first = addOption(content, group, Choice.WIZARD, selectedChoice,
-                    "Launch Setup Wizard",
-                    "Guided step-by-step setup: choose the database, the connection and the node settings.");
+                    wizardLabel, wizardDetail);
         }
         JRadioButton empty = addOption(content, group, Choice.EMPTY, selectedChoice,
                 "New Empty Profile",

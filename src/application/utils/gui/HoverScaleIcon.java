@@ -30,10 +30,15 @@ public final class HoverScaleIcon implements Icon {
 
     /**
      * Hover scale-up factor for toolbar icon buttons. On rollover the glyph
-     * is rendered this many times larger (1.15f → 15% bigger) instead of
+     * is rendered this many times larger (1.4f → ~40% bigger) instead of
      * changing colour.
+     * <p>
+     * This is the single, shared source of every icon button's hover growth — the
+     * node toolbar, the main-frame buttons, the browser navigation bar and the
+     * header profile toolbars' action buttons (including their New Profile "+")
+     * all use it, so the grow-on-hover effect is consistent app-wide.
      */
-    public static final float DEFAULT_SCALE = 1.15f;
+    public static final float DEFAULT_SCALE = 1.4f;
 
     private final int boxSize;
     private final Icon glyph;

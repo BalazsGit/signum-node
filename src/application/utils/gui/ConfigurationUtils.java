@@ -45,16 +45,53 @@ public class ConfigurationUtils {
 
     /**
      * THE single, uniformly adjustable gap between an input field and the
-     * action icon sitting next to it — the list editors' "+" add button and
-     * per-item trash icon and the logging profile rows' trash icon. (Password
-     * fields reveal/hide through FlatLaf's built-in reveal button — enabled
-     * globally by GuiManager#applyDefaultsAfterLaf — and need no adjacent
-     * control.) Every one of
-     * these field-adjacent icon gaps reads from this constant, so the
-     * distance is uniform across the configuration and logging panels and
-     * tunable in exactly one place.
+     * action icon sitting next to it — the list editors' "+" add button, the
+     * per-item trash icon, the property row's help ("?") icon and the logging
+     * profile rows' trash icon. (Password fields reveal/hide through FlatLaf's
+     * built-in reveal button — enabled globally by GuiManager#applyDefaultsAfterLaf
+     * — and need no adjacent control.) Every one of these field-adjacent icon
+     * gaps reads from this constant, so the distance is uniform across the
+     * configuration and logging panels and tunable in exactly one place.
      */
     public static final int INPUT_ACTION_GAP = 4;
+
+    /**
+     * THE single, shared MigLayout constraint for the horizontal separator that
+     * ends a configuration property row — it spans the full content width
+     * ({@code span}), grows horizontally ({@code growx}), wraps to the next row
+     * ({@code wrap}) and keeps a uniform 2px top/bottom gap. Read from this
+     * constant by every configuration panel (node, database) so the row
+     * separators look identical everywhere and are tunable in one place.
+     */
+    public static final String PROPERTY_SEPARATOR_CONSTRAINTS = "span, growx, wrap, gaptop 2, gapbottom 2";
+
+    /**
+     * THE single, shared column count (preferred width) of the search field in a
+     * configuration panel's search box. Read from this constant by
+     * {@link #createSearchField} and the shared {@link SearchMatchPanel} so every
+     * panel's search box has the same width and is tunable in one place.
+     */
+    public static final int SEARCH_FIELD_COLUMNS = 16;
+
+    /**
+     * Validates a TCP port value for the inline configuration editors.
+     *
+     * @param label    the setting label to include in the error
+     * @param rawValue the value currently shown by the editor
+     * @return a user-facing error, or {@code null} when the value is valid
+     */
+    public static String portValidationError(String label, String rawValue) {
+        int port;
+        try {
+            port = Integer.parseInt(rawValue == null ? "" : rawValue.trim());
+        } catch (NumberFormatException e) {
+            return "Invalid " + label + ": enter a whole number from 1 to 65535.";
+        }
+        if (port < 1 || port > 65535) {
+            return "Invalid " + label + ": value must be between 1 and 65535.";
+        }
+        return null;
+    }
 
     /**
      * Styles input components consistently using the global label font and the
@@ -109,6 +146,9 @@ public class ConfigurationUtils {
      */
     public static JTextField createSearchField(String placeholderText) {
         JTextField field = new JTextField();
+        // Uniform search-box width (the shared column count) so every panel's
+        // search field has the same size — see SEARCH_FIELD_COLUMNS.
+        field.setColumns(SEARCH_FIELD_COLUMNS);
         applySearchFieldStyle(field, placeholderText);
         return field;
     }
@@ -151,6 +191,45 @@ public class ConfigurationUtils {
     }
 
     /**
+     * Cache for the L&F-derived metrics below ({@link #standardControlHeight()}
+     * and {@link #plainComboTextX()}). Each metric is probed by building a
+     * throwaway one-item JComboBox — on its own a full L&F install (editor
+     * field, document, renderer), which must NOT be repeated for every input
+     * row of a panel (NodeConfigurationPanel.initUI calls these ~200+ times).
+     * The metrics are pure functions of the current L&F and default control
+     * font; a font / L&F change yields a new key and exactly one re-probe.
+     * Accessed on the EDT only (same contract as the probe methods).
+     */
+    private static String metricsCacheKey;
+    private static int cachedStandardControlHeight;
+    private static int cachedPlainComboTextX;
+
+    private static void ensureMetricsCached() {
+        // The probe combo's measured height / text-start margin are driven by the
+        // combo's own font (ComboBox.font) plus the L&F's border and renderer —
+        // key the cache on exactly those so a font or L&F change re-probes once.
+        String key = UIManager.getLookAndFeel().getClass().getName()
+                + '|' + UIManager.getFont("ComboBox.font");
+        if (key.equals(metricsCacheKey)) {
+            return;
+        }
+        // one item, so the combo's preferred HEIGHT is the real one-line value
+        // height (an empty model measures as border-only)
+        JComboBox<Object> plain = new JComboBox<>(new Object[]{ "X" });
+        cachedStandardControlHeight = plain.getPreferredSize().height;
+        Border plainBorder = plain.getBorder();
+        int plainBorderLeft = plainBorder == null ? 0 : plainBorder.getBorderInsets(plain).left;
+        @SuppressWarnings("unchecked")
+        ListCellRenderer<Object> probeRenderer = plain.getRenderer() != null
+                ? (ListCellRenderer<Object>) plain.getRenderer()
+                : new DefaultListCellRenderer();
+        java.awt.Component probeCell = probeRenderer.getListCellRendererComponent(
+                new JList<>(new String[0]), "X", 0, false, false);
+        cachedPlainComboTextX = plainBorderLeft + (probeCell instanceof JComponent jc ? jc.getInsets().left : 0);
+        metricsCacheKey = key;
+    }
+
+    /**
      * Where a plain (non-editable) combo of the current L&F starts its value
      * text: the combo border's left inset plus the renderer cell's left
      * margin — probed on throwaway components (one item, so its preferred
@@ -162,16 +241,8 @@ public class ConfigurationUtils {
      * preview all align their text to it.
      */
     public static int plainComboTextX() {
-        JComboBox<Object> plain = new JComboBox<>(new Object[]{ "X" });
-        Border plainBorder = plain.getBorder();
-        int plainBorderLeft = plainBorder == null ? 0 : plainBorder.getBorderInsets(plain).left;
-        @SuppressWarnings("unchecked")
-        ListCellRenderer<Object> probeRenderer = plain.getRenderer() != null
-                ? (ListCellRenderer<Object>) plain.getRenderer()
-                : new DefaultListCellRenderer();
-        java.awt.Component probeCell = probeRenderer.getListCellRendererComponent(
-                new JList<>(new String[0]), "X", 0, false, false);
-        return plainBorderLeft + (probeCell instanceof JComponent jc ? jc.getInsets().left : 0);
+        ensureMetricsCached();
+        return cachedPlainComboTextX;
     }
 
     /**
@@ -295,9 +366,8 @@ public class ConfigurationUtils {
      * @return the standard one-line control height in pixels (EDT)
      */
     public static int standardControlHeight() {
-        // one item, so its preferred HEIGHT is the real one-line value
-        // height (an empty model measures as border-only)
-        return new JComboBox<>(new Object[]{"X"}).getPreferredSize().height;
+        ensureMetricsCached();
+        return cachedStandardControlHeight;
     }
 
     /**
@@ -415,18 +485,16 @@ public class ConfigurationUtils {
         return x;
     }
 
-    /**
-     * The text field of a combo editor (the editor component itself with the
-     * Basic L&F, its child text field with the Metal one).
-     */
-    private static JTextField findEditorTextField(JComponent c) {
+    /** Finds the text field used by a combo editor, including wrapped editors. */
+    public static JTextField findEditorTextField(Component c) {
         if (c instanceof JTextField tf) {
             return tf;
         }
-        if (c instanceof java.awt.Container cont) {
-            for (java.awt.Component child : cont.getComponents()) {
-                if (child instanceof JTextField tf) {
-                    return tf;
+        if (c instanceof Container cont) {
+            for (Component child : cont.getComponents()) {
+                JTextField textField = findEditorTextField(child);
+                if (textField != null) {
+                    return textField;
                 }
             }
         }
@@ -591,7 +659,7 @@ public class ConfigurationUtils {
                 String key = line.substring(0, sepIdx).trim();
                 if (props.containsKey(key)) {
                     String val = props.getProperty(key);
-                    newLines.add(key + "=" + escapePropertyValue(val));
+                    newLines.add(key + "=" + escapePropertyValueForStorage(val));
                     processedKeys.add(key);
                 } else {
                     if (managedKeys == null || !managedKeys.contains(key)) {
@@ -605,10 +673,35 @@ public class ConfigurationUtils {
 
         for (String key : props.stringPropertyNames()) {
             if (!processedKeys.contains(key)) {
-                newLines.add(key + "=" + escapePropertyValue(props.getProperty(key)));
+                newLines.add(key + "=" + escapePropertyValueForStorage(props.getProperty(key)));
             }
         }
         Files.write(file, newLines);
+    }
+
+    private static String escapePropertyValueForStorage(String value) {
+        String escaped = escapePropertyValue(value);
+        if (value == null || value.isEmpty()) {
+            return escaped;
+        }
+        int leadingSpaces = 0;
+        while (leadingSpaces < value.length() && value.charAt(leadingSpaces) == ' ') {
+            leadingSpaces++;
+        }
+        int trailingSpaces = 0;
+        while (trailingSpaces < value.length()
+                && value.charAt(value.length() - trailingSpaces - 1) == ' ') {
+            trailingSpaces++;
+        }
+        StringBuilder result = new StringBuilder(escaped.length() + leadingSpaces + trailingSpaces);
+        for (int i = 0; i < escaped.length(); i++) {
+            if (i < leadingSpaces || i >= escaped.length() - trailingSpaces) {
+                result.append("\\ ");
+            } else {
+                result.append(escaped.charAt(i));
+            }
+        }
+        return result.toString();
     }
 
     /**
@@ -621,11 +714,102 @@ public class ConfigurationUtils {
     public static String escapePropertyValue(String value) {
         if (value == null)
             return "";
-        return value.replace("\\", "\\\\")
-                .replace("\t", "\\t")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\f", "\\f");
+        StringBuilder escaped = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char current = value.charAt(i);
+            switch (current) {
+                case '\\' -> escaped.append("\\\\");
+                case '\t' -> escaped.append("\\t");
+                case '\n' -> escaped.append("\\n");
+                case '\r' -> escaped.append("\\r");
+                case '\f' -> escaped.append("\\f");
+                default -> {
+                    if (Character.isISOControl(current)) {
+                        escaped.append(String.format(java.util.Locale.ROOT, "\\u%04X", (int) current));
+                    } else {
+                        escaped.append(current);
+                    }
+                }
+            }
+        }
+        return escaped.toString();
+    }
+
+    /**
+     * Makes control characters and literal backslashes visible in an editable
+     * property value using Java-properties escapes.
+     */
+    public static String propertyValueForEditing(String value) {
+        return escapePropertyValue(value);
+    }
+
+    public static String debugTraceSeparatorForEditing(String value) {
+        return escapePropertyValue(value).replace(" ", "\\u0020");
+    }
+
+    public static String encodeWhitespaceForEditing(String value) {
+        if (value == null || value.isEmpty()) {
+            return value == null ? "" : value;
+        }
+        StringBuilder encoded = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char current = value.charAt(i);
+            switch (current) {
+                case ' ' -> encoded.append("\\u0020");
+                case '\t' -> encoded.append("\\t");
+                case '\n' -> encoded.append("\\n");
+                case '\r' -> encoded.append("\\r");
+                case '\f' -> encoded.append("\\f");
+                default -> {
+                    if (Character.isISOControl(current)) {
+                        encoded.append(String.format(java.util.Locale.ROOT, "\\u%04X", (int) current));
+                    } else {
+                        encoded.append(current);
+                    }
+                }
+            }
+        }
+        return encoded.toString();
+    }
+
+    /**
+     * Decodes Java-properties escapes entered in an editable property value.
+     */
+    public static String propertyValueFromEditing(String value) {
+        if (value == null) {
+            return "";
+        }
+        StringBuilder decoded = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char current = value.charAt(i);
+            if (current != '\\' || i + 1 >= value.length()) {
+                decoded.append(current);
+                continue;
+            }
+            char escaped = value.charAt(++i);
+            switch (escaped) {
+                case 't' -> decoded.append('\t');
+                case 'n' -> decoded.append('\n');
+                case 'r' -> decoded.append('\r');
+                case 'f' -> decoded.append('\f');
+                case '\\' -> decoded.append('\\');
+                case 'u' -> {
+                    if (i + 4 < value.length()) {
+                        String hex = value.substring(i + 1, i + 5);
+                        try {
+                            decoded.append((char) Integer.parseInt(hex, 16));
+                            i += 4;
+                        } catch (NumberFormatException e) {
+                            decoded.append('\\').append(escaped);
+                        }
+                    } else {
+                        decoded.append('\\').append(escaped);
+                    }
+                }
+                default -> decoded.append('\\').append(escaped);
+            }
+        }
+        return decoded.toString();
     }
 
     /**
@@ -816,22 +1000,49 @@ public class ConfigurationUtils {
             JButton renameBtn, JButton deleteBtn, JButton reloadBtn, JButton refreshBtn,
             JButton resetToDefaultsBtn, JButton copyBtn, JButton cloneBtn) {
         float iconSize = GuiConstants.getToolBarIconSize();
-        Color iconColor = GuiColors.getButtonIcon();
 
-        styleProfileIconButton(newBtn, FontAwesome.FILE_O, iconColor, iconSize);
-        styleProfileIconButton(saveBtn, FontAwesome.FLOPPY_O, iconColor, iconSize);
-        styleProfileIconButton(applyBtn, FontAwesome.CHECK_CIRCLE_O, iconColor, iconSize);
-        styleProfileIconButton(renameBtn, FontAwesome.PENCIL_SQUARE_O, iconColor, iconSize);
+        // Every action — including the "+" (New Profile) — is the same kind of
+        // profile-toolbar button: a glyph at the toolbar icon size that grows on
+        // hover by the shared {@link HoverScaleIcon#DEFAULT_SCALE}. The "+" renders
+        // into the same non-square font-metric box as its FontAwesome siblings, so
+        // the row's margins stay uniform and it grows in step with them.
+        styleProfileActionButton(newBtn, ProfileActionIcon.NEW_PROFILE, iconSize);
+        styleProfileActionButton(saveBtn, ProfileActionIcon.SAVE_PROFILE, iconSize);
+        styleProfileActionButton(applyBtn, ProfileActionIcon.APPLY_PROFILE, iconSize);
+        styleProfileActionButton(renameBtn, ProfileActionIcon.RENAME_PROFILE, iconSize);
         // delete stands out in the palette's contrast red (a destructive action)
-        styleProfileIconButton(deleteBtn, FontAwesome.TRASH_O, GuiColors.getContrastRed(), iconSize);
-        styleProfileIconButton(reloadBtn, FontAwesome.RECYCLE, iconColor, iconSize);
-        // Refresh and Reset to Defaults intentionally use swapped glyphs (a deliberate
-        // visual choice kept in this single source of truth so that every profile
-        // toolbar — node configuration, logging, appearance, ... — stays identical).
-        styleProfileIconButton(refreshBtn, FontAwesome.UNDO, iconColor, iconSize);
-        styleProfileIconButton(resetToDefaultsBtn, FontAwesome.REFRESH, iconColor, iconSize);
-        styleProfileIconButton(copyBtn, FontAwesome.CLIPBOARD, iconColor, iconSize);
-        styleProfileIconButton(cloneBtn, FontAwesome.FILES_O, iconColor, iconSize);
+        styleProfileActionButton(deleteBtn, ProfileActionIcon.DELETE_PROFILE, iconSize);
+        styleProfileActionButton(reloadBtn, ProfileActionIcon.RELOAD_PROFILE, iconSize);
+        styleProfileActionButton(refreshBtn, ProfileActionIcon.REFRESH_PROFILES, iconSize);
+        styleProfileActionButton(resetToDefaultsBtn, ProfileActionIcon.RESET_PROFILE_TO_DEFAULTS, iconSize);
+        styleProfileActionButton(copyBtn, ProfileActionIcon.COPY_PROFILE, iconSize);
+        styleProfileActionButton(cloneBtn, ProfileActionIcon.CLONE_PROFILE, iconSize);
+    }
+
+    /**
+     * Styles the New Profile action with the shared thin plus glyph
+     * ({@link ProfileActionIcon#NEW_PROFILE}) and the standard profile-toolbar button
+     * treatment — the same size and hover growth as the other profile actions, so
+     * the "+" lines up and grows exactly like its siblings.
+     */
+    public static void styleNewProfileButton(JButton button) {
+        styleProfileActionButton(button, ProfileActionIcon.NEW_PROFILE, GuiConstants.getToolBarIconSize());
+    }
+
+    /**
+     * Styles a profile action with its semantic catalog icon and standard
+     * profile-toolbar button treatment.
+     */
+    public static void styleProfileIconButton(JButton button, ProfileActionIcon icon, float iconSize) {
+        styleProfileActionButton(button, icon, iconSize);
+    }
+
+    private static void styleProfileActionButton(JButton button, ProfileActionIcon icon, float iconSize) {
+        if (button == null) {
+            return;
+        }
+        icon.install(button, iconSize);
+        styleProfileButtonSurface(button);
     }
 
     /**
@@ -849,14 +1060,42 @@ public class ConfigurationUtils {
         if (button == null) {
             return;
         }
+        // P8 (delete-repro fix): route the profile-toolbar glyphs through the shared
+        // IconFontCache — jiconfont re-inflates the ~165 KB FontAwesome TTF on every
+        // buildIcon call, and this method styles EVERY profile-toolbar button across
+        // all panels, so uncached builds thrash the IconFontSwing class lock.
         HoverScaleIcon.install(button,
-                IconFontSwing.buildIcon(iconCode, iconSize, color),
-                IconFontSwing.buildIcon(iconCode, iconSize * HoverScaleIcon.DEFAULT_SCALE, color));
+                IconFontCache.buildIcon(iconCode, iconSize, color),
+                IconFontCache.buildIcon(iconCode, iconSize * HoverScaleIcon.DEFAULT_SCALE, color));
+        styleProfileButtonSurface(button);
+    }
+
+    private static void styleProfileButtonSurface(JButton button) {
         button.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
         button.setMargin(profileToolbarButtonMargin());
         button.setOpaque(false);
         button.setContentAreaFilled(false);
         button.setCursor(PROFILE_TOOLBAR_CURSOR);
+    }
+
+    /**
+     * The custom-glyph variant of {@link #styleProfileIconButton(JButton, FontAwesome, Color, float)}:
+     * the same flat profile-toolbar icon-button styling (hover-grow pair, slim uniform
+     * border, unfilled surface, standard arrow cursor) around a caller-provided
+     * {@link Icon} glyph instead of a FontAwesome code — e.g. the app's thin hand-drawn
+     * plus ({@link PlusGlyphIcon}), which is not a FontAwesome glyph.
+     *
+     * @param button      the button to style (a {@code null} button is skipped)
+     * @param normalGlyph the glyph used in the normal (non-hover) state
+     * @param hoverGlyph  the glyph used in the rollover (hover) state (typically the
+     *                    same glyph rendered at {@link HoverScaleIcon#DEFAULT_SCALE})
+     */
+    public static void styleProfileIconButton(JButton button, Icon normalGlyph, Icon hoverGlyph) {
+        if (button == null) {
+            return;
+        }
+        HoverScaleIcon.install(button, normalGlyph, hoverGlyph);
+        styleProfileButtonSurface(button);
     }
 
     /**
@@ -906,26 +1145,50 @@ public class ConfigurationUtils {
      * Maximum width (pixels) of the profile-action toolbar tooltips — the
      * mouse-over helper boxes of the New / Save / Apply / ... icon buttons in
      * the node configuration, logging, module logging and appearance rows. A
-     * single, central value: every one of those buttons pins its tooltip to
-     * this width, so the helper box is a uniform size that never exceeds the
-     * maximum and long text wraps onto multiple lines instead of stretching
-     * the box.
+     * single, central value that is a <em>maximum</em>, not a fixed size: a
+     * tooltip sizes itself to its text and is only capped (and wrapped onto
+     * several lines) once the text would be wider than this maximum.
      */
     public static final int PROFILE_TOOLTIP_MAX_WIDTH = 360;
 
     /**
-     * Builds the width-capped, wrapping HTML tooltip shared by every button in
-     * the profile-action toolbars (node configuration, logging, module logging
-     * and appearance). The body is rendered inside a {@code <body>} pinned to
-     * {@link #PROFILE_TOOLTIP_MAX_WIDTH}, so the helper box is a uniform width
-     * that never exceeds the maximum and long text wraps onto several lines
-     * instead of growing the box.
+     * Builds the HTML tooltip shared by every button in the profile-action
+     * toolbars (node configuration, logging, module logging and appearance).
+     * The box sizes itself to the text: if the text's natural (widest line)
+     * width fits within {@link #PROFILE_TOOLTIP_MAX_WIDTH} it is rendered at
+     * that natural width, with no dead padding; if it would exceed the maximum
+     * the body is pinned to the maximum so the long text wraps onto several
+     * lines instead of stretching the box across the screen.
      *
      * @param text the tooltip body (plain text; use {@code <br>} for hard line breaks)
-     * @return the ready-to-set HTML tooltip string
+     * @return the ready-to-set HTML tooltip string, or {@code null} for a {@code null} body
      */
     public static String profileTooltip(String text) {
-        return "<html><body style='width: " + PROFILE_TOOLTIP_MAX_WIDTH + "px'>" + text + "</body></html>";
+        if (text == null) {
+            return null;
+        }
+        if (naturalTooltipWidth(text) <= PROFILE_TOOLTIP_MAX_WIDTH) {
+            return "<html>" + text + "</html>";
+        }
+        return "<html><body width='" + PROFILE_TOOLTIP_MAX_WIDTH + "'>" + text + "</body></html>";
+    }
+
+    /**
+     * The natural (unwrapped) preferred width of an HTML tooltip body, in the
+     * default UI font: the width the widest {@code <br>} line would need to be
+     * laid out on a single line. {@link #profileTooltip(String)} uses it to
+     * decide whether the box renders at the text's natural width or is pinned
+     * to {@link #PROFILE_TOOLTIP_MAX_WIDTH} (and wrapped).
+     *
+     * <p>Measured with a throwaway {@link JLabel} that shares the tooltip's HTML
+     * rendering; it is created at button-construction time (a one-shot cost per
+     * tooltip, not a per-frame one) and carries no border, so the width is the
+     * pure HTML content width.
+     */
+    private static int naturalTooltipWidth(String text) {
+        JLabel probe = new JLabel("<html>" + text + "</html>");
+        probe.setBorder(BorderFactory.createEmptyBorder());
+        return probe.getPreferredSize().width;
     }
 
     /**
@@ -1087,28 +1350,21 @@ public class ConfigurationUtils {
     }
 
     /**
-     * Reads the logging configuration according to the three-layer model:
+     * Reads the logging configuration according to the two-layer model:
      * <pre>
      *   L0: hardcoded internal defaults ({@link LoggerProfile#applyInternalDefaults()}).
-     *   L1: {confFolder}/node/logging/default.properties — the user-editable
-     *       L1 layer; its ACTIVE lines override L0 for every profile. It is
-     *       always consulted, so an empty (or missing) "logging.properties" can
-     *       no longer preempt the L1 layer's active lines.
      *   L2: {confFolder}/node/logging/{profileName}.properties, falling back to
-     *       the shared "logging.properties" — its active lines override L0 and L1.
+     *       the shared "logging.properties" — its active lines override L0.
      * </pre>
      * Path schema: {confFolder}/node/logging/{profileName}.properties
      *
      * @param confFolder  the base configuration root (e.g. "./conf"), never null
      * @param profileName the logging profile name to load
-     * @return the effective LoggerProfile (L0 + the active lines of L1 and L2)
+     * @return the effective LoggerProfile (L0 + the active lines of L2)
      */
     public static LoggerProfile loadEffectiveLoggerProfile(String confFolder, String profileName) {
         LoggerProfile effective = new LoggerProfile(profileName);
         effective.applyInternalDefaults();
-
-        // L1: the user-editable default layer — always consulted when present.
-        loadLoggingLayer(effective, confFolder, ReservedNames.DEFAULT_PROFILE_NAME);
 
         // L2: the profile's own file, falling back to the shared "logging" file.
         Path pathToLoad = PropertiesProfileLoader.resolveProfileFile(

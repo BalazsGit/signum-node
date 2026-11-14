@@ -189,7 +189,7 @@ public class MainFrame extends JFrame {
      * application" action (see {@link #confirmAndRestart()}).
      * <p>
      * On mouse rollover the glyph grows by {@link HoverScaleIcon#DEFAULT_SCALE}
-     * (15%) inside the same fixed bounding box — no layout shift — using the
+     * (~40%) inside the same fixed bounding box — no layout shift — using the
      * shared hover-scale behaviour of the node toolbar icon buttons.
      * </p>
      */
@@ -217,7 +217,7 @@ public class MainFrame extends JFrame {
      * Creates the red shutdown icon button (color palette POWER_OFF glyph).
      * <p>
      * On mouse rollover the glyph grows by {@link HoverScaleIcon#DEFAULT_SCALE}
-     * (15%) inside the same fixed bounding box — no layout shift — using the
+     * (~40%) inside the same fixed bounding box — no layout shift — using the
      * shared hover-scale behaviour of the node toolbar icon buttons.
      * </p>
      */
