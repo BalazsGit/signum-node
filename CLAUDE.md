@@ -93,6 +93,17 @@ Signum Node is the reference implementation of the Signum blockchain - a cryptoc
 - Logging configuration follows the same model: hardcoded logging defaults
   <- `conf/node/logging/default.properties` (L1) <- the logging profile file (L2); the
   merge lives in `application.utils.gui.ConfigurationUtils.loadEffectiveLoggerProfile`
+- Profile files are **minimal overrides**: a key whose value equals the `Props`
+  default is absent (a missing key means the default, never "no value").
+  `ConfigurationUtils.savePropertiesPreservingFormat` (file) and
+  `NodeConfigurationPanel.doSaveCurrentProfile` (virtual wizard save, which
+  MERGES per managed key — never replaces) follow this convention.
+  Setup wizard: the in-memory session profile
+  (`WizardContext.getVirtualProfile()`) is the authoritative property store;
+  the node-configuration step mirrors its port / DB.Url edits into it live
+  (keystroke by keystroke), the advanced editor's save merges into it, and
+  `NodeConfigurationStep.readBackFromVirtualProfile` (default fallback per
+  port) reads it back on dialog close.
 
 ### Multi-Network Support
 - `signum.net.NetworkParameters` - Network configuration base

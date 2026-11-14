@@ -427,10 +427,13 @@ tasks.register('dist', Zip) {
         emptyFile.write('')
     }
 
-    from(file("$buildDir/empty.properties")) { into "conf/node"; rename { "node.properties" } }
+    from(file("$buildDir/empty.properties")) { into "conf/node/profiles"; rename { "node.properties" } }
     from(file("$buildDir/empty.properties")) { into "conf/node/logging"; rename { "logging.properties" } }
-    from("resources/conf/node/profiles") { into "conf/node/profiles" } // Copy default node profile from resources
-    from("resources/conf/node/logging") { into "conf/node/logging" } // Copy default node logging config from resources
+    from(file("$buildDir/empty.properties")) { into "conf/system/logging"; rename { "system-logging.properties" } }
+    from(file("$buildDir/empty.properties")) { into "conf/appearance/profiles"; rename { "appearance.properties" } }
+    from("resources/conf/node/profiles") { into "conf/node/profiles" } // template/ subdirectory
+    from("resources/conf/node/logging") { into "conf/node/logging" } // template/ subdirectory
+    from("resources/conf/system/logging") { into "conf/system/logging" } // template/ subdirectory
     into('html') { from "html" }
     from "LICENSE.txt"
     from "README.md"

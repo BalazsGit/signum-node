@@ -85,3 +85,10 @@ result
 /conf/logging-runtime/
 /conf/test-mod/
 /conf/node/logging/default.properties
+
+# Local analysis notes (local development artifacts)
+/analizis/
+
+# Personal Cline profiles and their generated workspace installation
+/.cline-local/
+/.cline/
