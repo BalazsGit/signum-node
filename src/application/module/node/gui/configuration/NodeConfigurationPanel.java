@@ -3417,13 +3417,12 @@ public class NodeConfigurationPanel extends JPanel {
         // Column 1 (labels): ABSOLUTE width 380, never shrinks (shrink 0).
         // Column 2 (inputs): grows and absorbs ALL shrink (shrink 100).
         // Column 3 (help buttons): content-sized.
-        // capMinimumWidth=true so the JViewport keeps tracking the viewport
-        // width even when the window is narrow (the MigLayout's natural minimum
-        // is dominated by combo/ListEditor minimums and would prevent the
-        // input column from shrinking below ~280px).
+        // capMinimumWidth=false: the MigLayout's natural minimum (sum of
+        // component minimums) determines when the scrollbar appears — exactly
+        // when the inputs can no longer shrink further.
         MigLayout layout = new MigLayout("fillx, insets 10, gap " + rowGap,
                 "[380!, shrink 0][grow, shrink 100][]", "");
-        return new ViewportWidthPanel(layout, true);
+        return new ViewportWidthPanel(layout, false);
     }
 
     private static final class ViewportWidthPanel extends JPanel implements Scrollable {
@@ -3684,7 +3683,7 @@ public class NodeConfigurationPanel extends JPanel {
                     ? "split 2, height pref!"
                     : "split " + (portRestoreButton == null ? 2 : 3) + ", growx, height pref!";
         } else {
-            row.inputConstraints = "growx, wmin 0, height pref!";
+            row.inputConstraints = "growx, height pref!";
         }
         panel.add(inputComponent, row.inputConstraints);
         if (portRestoreButton != null) {
@@ -4380,7 +4379,7 @@ public class NodeConfigurationPanel extends JPanel {
             }
         });
         updateColor(passwordField, prop.getName(), getSafeDefault(prop));
-        row.inputConstraints = wizardMode ? "split 2, growx, height pref!" : "growx, wmin 0, height pref!";
+        row.inputConstraints = wizardMode ? "split 2, growx, height pref!" : "growx, height pref!";
         panel.add(passwordField, row.inputConstraints);
 
         // Help Button
