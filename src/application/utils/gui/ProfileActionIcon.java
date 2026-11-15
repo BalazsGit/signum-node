@@ -18,7 +18,7 @@ import javax.swing.JButton;
  */
 public enum ProfileActionIcon {
     NEW_PROFILE(plusGlyph(), GuiColors::getButtonIcon),
-    SAVE_PROFILE(fontAwesome(FontAwesome.FLOPPY_O), GuiColors::getButtonIcon),
+    SAVE_PROFILE(fontAwesome(FontAwesome.FLOPPY_O), GuiColors::getSaved),
     APPLY_PROFILE(fontAwesome(FontAwesome.CHECK_CIRCLE_O), GuiColors::getButtonIcon),
     RENAME_PROFILE(fontAwesome(FontAwesome.PENCIL_SQUARE_O), GuiColors::getButtonIcon),
     DELETE_PROFILE(fontAwesome(FontAwesome.TRASH_O), GuiColors::getContrastRed),
