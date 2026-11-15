@@ -20,6 +20,7 @@ import application.utils.gui.LeftFlowLayout;
 import application.utils.gui.NewProfileChoiceDialog;
 import application.utils.gui.ResponsiveToolbarScrollPane;
 import application.utils.gui.SearchMatchPanel;
+import application.utils.gui.SearchValueHighlight;
 import application.utils.io.PathUtils;
 
 import com.google.gson.JsonObject;
@@ -34,17 +35,20 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.border.TitledBorder;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
+import javax.swing.text.JTextComponent;
 import java.awt.*;
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import javax.swing.text.BadLocationException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -96,6 +100,9 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
     private JTabbedPane sqliteTabs;
     private SQLiteDatabaseAssignmentPanel assignmentsPanel;
     private boolean isInitialized = false;
+    private int searchActiveIndex = -1;
+    private List<PropertyRow> searchMatches = List.of();
+    private final Map<JTextComponent, Object> searchValueHighlights = new java.util.IdentityHashMap<>();
 
     private final Icon checkIcon = DatabaseActionIcon.VALIDATION_SUCCESS.icon(GuiConstants.getHelpIconSize());
 
@@ -182,19 +189,8 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
         searchMatchPanel = new SearchMatchPanel(
                 "Search by property name, label or value");
         searchField = searchMatchPanel.getSearchField();
-        searchField.getDocument().addDocumentListener(new DocumentListener() {
-            public void insertUpdate(DocumentEvent e) {
-                filterProperties(searchField.getText());
-            }
-
-            public void removeUpdate(DocumentEvent e) {
-                filterProperties(searchField.getText());
-            }
-
-            public void changedUpdate(DocumentEvent e) {
-                filterProperties(searchField.getText());
-            }
-        });
+        searchMatchPanel.setSearchTextListener(text -> filterProperties(text));
+        searchMatchPanel.setSearchNavigationListener(this::navigateSearch);
 
         showValuesPanel = new CheckboxGroupPanel("Show values");
         showValuesPanel.setChangeListener(button -> filterProperties(searchField.getText()));
@@ -357,6 +353,7 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
         databaseFileEditor.setCandidates(refreshDatabaseFileCandidates(fileName));
         List<String> discoveredFiles = loadDatabaseFileList(fileName);
         databaseFileEditor.setItemsWithProtected(discoveredFiles, new java.util.HashSet<>(discoveredFiles));
+        databaseFileEditor.setItemSavedValues(discoveredFiles.stream().map(n -> n.endsWith(".db") ? n.substring(0, n.length() - 3) : n).toList());
         databaseFileEditor.onChange = () -> propertyChanged(databaseFileEditor, SQLiteProfile.CFG_URL);
         databaseFileEditor.removeConfirmation = this::confirmDatabaseFileDeletion;
         databaseFileEditor.helpAction = () -> JOptionPane.showMessageDialog(this,
@@ -424,20 +421,31 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
     }
 
     /**
-     * The {@code *.db} candidate names offered by the database-file list's
-     * dropdowns: the files discovered in the profile's database directory, with
-     * the conventional {@code signum.sqlite.db} and the active file guaranteed
-     * to be offered.
+     * The candidate names offered by the add row's dropdown: the files discovered
+     * in the profile's database directory, with the conventional
+     * {@code signum.sqlite} and the active file guaranteed to be offered.
+     * Names are returned WITHOUT the {@code .db} extension (the suffix is
+     * displayed as a static label by the editor).
      */
     private List<String> refreshDatabaseFileCandidates(String activeFile) {
-        List<String> names = new ArrayList<>(SqliteDatabasePaths.discoverDbFiles(databaseDirectory));
-        if (!names.contains("signum.sqlite.db")) {
-            names.add("signum.sqlite.db");
+        List<String> names = new ArrayList<>();
+        for (String name : SqliteDatabasePaths.discoverDbFiles(databaseDirectory)) {
+            names.add(stripDbExtension(name));
         }
-        if (activeFile != null && !activeFile.isBlank() && !names.contains(activeFile)) {
-            names.add(activeFile);
+        if (!names.contains("signum.sqlite")) {
+            names.add("signum.sqlite");
+        }
+        if (activeFile != null && !activeFile.isBlank()) {
+            String stripped = stripDbExtension(activeFile);
+            if (!names.contains(stripped)) {
+                names.add(stripped);
+            }
         }
         return names;
+    }
+
+    private static String stripDbExtension(String name) {
+        return name != null && name.endsWith(".db") ? name.substring(0, name.length() - 3) : name;
     }
 
     /**
@@ -1031,6 +1039,9 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
                 searchViewActive = false;
             }
             lastFilteredRows = null;
+            searchMatches = List.of();
+            searchActiveIndex = -1;
+            updateSearchMatchIndicator(null);
             return;
         }
 
@@ -1071,6 +1082,26 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
             contentCardLayout.show(contentContainer, "SEARCH");
             searchViewActive = true;
         }
+        // Update match tracking and indicator (only for text search, not filter-only)
+        if (!low.isEmpty()) {
+            searchMatches = List.copyOf(matchingRows);
+            if (searchActiveIndex < 0 && !matchingRows.isEmpty()) {
+                searchActiveIndex = 0;
+            }
+            if (searchActiveIndex >= matchingRows.size()) {
+                searchActiveIndex = matchingRows.isEmpty() ? -1 : matchingRows.size() - 1;
+            }
+            updateSearchMatchIndicator(formatSearchIndicator());
+            // Highlight the active match's value text
+            if (searchActiveIndex >= 0 && searchActiveIndex < searchMatches.size()) {
+                paintSearchMatch(searchMatches.get(searchActiveIndex), true);
+            }
+        } else {
+            searchMatches = List.of();
+            searchActiveIndex = -1;
+            updateSearchMatchIndicator(null);
+            clearAllValueHighlights();
+        }
         searchResultsPanel.revalidate();
         searchResultsPanel.repaint();
     }
@@ -1085,6 +1116,117 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
             }
         }
         return true;
+    }
+
+    private void navigateSearch(boolean next) {
+        String query = searchMatchPanel.getSearchText().trim();
+        if (query.isEmpty() || searchMatches.isEmpty()) {
+            return;
+        }
+        int count = searchMatches.size();
+        int oldIndex = searchActiveIndex;
+        searchActiveIndex = next
+                ? (searchActiveIndex + 1) % count
+                : (searchActiveIndex - 1 + count) % count;
+        if (oldIndex >= 0 && oldIndex < count && oldIndex != searchActiveIndex) {
+            paintSearchMatch(searchMatches.get(oldIndex), false);
+        }
+        paintSearchMatch(searchMatches.get(searchActiveIndex), true);
+        updateSearchMatchIndicator(formatSearchIndicator());
+        SwingUtilities.invokeLater(() -> scrollToActiveMatch());
+    }
+
+    private void paintSearchMatch(PropertyRow row, boolean active) {
+        if (row.label instanceof JLabel label) {
+            label.setFont(active
+                    ? label.getFont().deriveFont(java.awt.Font.BOLD)
+                    : label.getFont().deriveFont(java.awt.Font.PLAIN));
+        }
+        highlightValueMatch(row, active);
+    }
+
+    private void highlightValueMatch(PropertyRow row, boolean active) {
+        String query = searchMatchPanel.getSearchText().trim();
+        if (query.isEmpty() || row.input == null) {
+            return;
+        }
+        JTextComponent target = rowValueTextComponent(row);
+        if (target == null) {
+            return;
+        }
+        // Remove any previous highlight on this component
+        Object previous = searchValueHighlights.remove(target);
+        if (previous != null) {
+            target.getHighlighter().removeHighlight(previous);
+        }
+        if (!active) {
+            return;
+        }
+        String value = target.getText();
+        int idx = value.toLowerCase(Locale.ROOT).indexOf(query.toLowerCase(Locale.ROOT));
+        if (idx < 0) {
+            return;
+        }
+        try {
+            searchValueHighlights.put(target,
+                    target.getHighlighter().addHighlight(idx, idx + query.length(),
+                            SearchValueHighlight.PAINTER_ACTIVE));
+        } catch (BadLocationException e) {
+            // range outside document bounds
+        }
+    }
+
+    private static JTextComponent rowValueTextComponent(PropertyRow row) {
+        JComponent input = row.input;
+        if (input instanceof JTextComponent textComponent) {
+            return textComponent;
+        }
+        if (input instanceof JComboBox<?> comboBox && comboBox.isEditable()) {
+            Object editorComponent = comboBox.getEditor().getEditorComponent();
+            if (editorComponent instanceof JTextComponent textComponent) {
+                return textComponent;
+            }
+        }
+        return null;
+    }
+
+    private void clearAllValueHighlights() {
+        for (Map.Entry<JTextComponent, Object> entry : searchValueHighlights.entrySet()) {
+            entry.getKey().getHighlighter().removeHighlight(entry.getValue());
+        }
+        searchValueHighlights.clear();
+    }
+
+    private void scrollToActiveMatch() {
+        if (searchActiveIndex < 0 || searchActiveIndex >= searchMatches.size()) {
+            return;
+        }
+        PropertyRow row = searchMatches.get(searchActiveIndex);
+        if (row.label == null || row.label.getParent() == null) {
+            return;
+        }
+        // Find the nearest scrollable ancestor and scroll the row into view.
+        java.awt.Component parent = row.label.getParent();
+        while (parent != null && !(parent instanceof JScrollPane)) {
+            parent = parent.getParent();
+        }
+        if (parent instanceof JScrollPane sp) {
+            sp.getViewport().scrollRectToVisible(row.label.getBounds());
+        }
+    }
+
+    private String formatSearchIndicator() {
+        if (searchMatches.isEmpty()) {
+            return null;
+        }
+        int idx = Math.max(0, searchActiveIndex) + 1;
+        return idx + "/" + searchMatches.size();
+    }
+
+    private void updateSearchMatchIndicator(String text) {
+        boolean hasMatches = text != null && !text.isEmpty();
+        searchMatchPanel.setChevronsVisible(hasMatches);
+        searchMatchPanel.setMatchIndicatorText(text);
     }
 
     private void restoreSettingsRows() {
