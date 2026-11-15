@@ -56,5 +56,5 @@
   "gui.state.ready": "#6495ED",
   "gui.state.paused": "#673AB7",
   "gui.search.match": "#605B8DEF",
-  "gui.search.active.match": "#DCFFA726"
+  "gui.search.active.match": "#DCFFA7A8"
 }
