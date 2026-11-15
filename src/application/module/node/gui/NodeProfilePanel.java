@@ -30,6 +30,7 @@ import javax.swing.Icon;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
@@ -232,7 +233,11 @@ public class NodeProfilePanel extends JPanel {
 
             nodeContextLogger().debug("Creating LoggerConfigurationPanel for profile: {}", profile.getName());
             loggingPanel = new NodeLoggingPanel(profile.getName(), this::applyLoggingLive);
-            innerTabbedPane.addTab("Logging", loggingPanel);
+            JScrollPane loggingScrollPane = new JScrollPane(loggingPanel);
+            loggingScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+            loggingScrollPane.getVerticalScrollBar().setUnitIncrement(16);
+            loggingScrollPane.setBorder(BorderFactory.createEmptyBorder());
+            innerTabbedPane.addTab("Logging", loggingScrollPane);
             nodeContextLogger().debug("Logging tab added successfully");
 
             nodeContextLogger().debug("Adding innerTabbedPane to CENTER (total tabs: {})", innerTabbedPane.getTabCount());
