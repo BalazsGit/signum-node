@@ -391,6 +391,58 @@ class NodeConfigurationPanelWizardModeTest {
                         + ", view=" + apiSettings.getViewport().getView().getWidth());
     }
 
+    @Test
+    @DisplayName("non-wizard: scrollbar appearance does not stretch inputs (validation visible)")
+    void nonWizardScrollNoStretchWithValidation() throws Exception {
+        NodeConfigurationPanel panel = buildPanel(false);
+
+        // Trigger the validation label + restore button by setting an invalid port.
+        SwingUtilities.invokeAndWait(() -> {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, JComponent> components =
+                        (Map<String, JComponent>) readDeclaredField(panel, "propertyComponents");
+                JComboBox<?> apiPort = (JComboBox<?>) components.get(Props.API_PORT.getName());
+                JTextField editor = (JTextField) apiPort.getEditor().getEditorComponent();
+                editor.setText("99999");
+            } catch (Exception e) {
+                throw new AssertionError(e);
+            }
+        });
+        SwingUtilities.invokeAndWait(() -> { }); // pump EDT for validation update
+
+        // Verify the validation label and restore button are visible.
+        @SuppressWarnings("unchecked")
+        Map<String, JTextArea> validationLabels =
+                (Map<String, JTextArea>) readDeclaredField(panel, "portValidationLabels");
+        assertTrue(validationLabels.get(Props.API_PORT.getName()).isVisible(),
+                "precondition: validation label is visible");
+        @SuppressWarnings("unchecked")
+        Map<String, JButton> restoreButtons =
+                (Map<String, JButton>) readDeclaredField(panel, "portRestoreButtons");
+        assertTrue(restoreButtons.get(Props.API_PORT.getName()).isVisible(),
+                "precondition: restore button is visible");
+
+        // Get the first tab's scroll pane and its content panel (ViewportWidthPanel).
+        JTabbedPane tabs = (JTabbedPane) readDeclaredField(panel, "categoryTabbedPane");
+        JScrollPane scrollPane = (JScrollPane) tabs.getComponentAt(0);
+        java.awt.Component contentPanel = scrollPane.getViewport().getView();
+
+        int minW = contentPanel.getMinimumSize().width;
+        int prefW = contentPanel.getPreferredSize().width;
+
+        // When the JViewport stops tracking the viewport width (scrollbar appears),
+        // it sizes the view to its PREFERRED width. If preferred >> minimum, the
+        // input fields suddenly stretch. The difference must stay small so the
+        // transition is imperceptible.
+        int delta = prefW - minW;
+        assertTrue(delta <= 10,
+                "panel preferred width must equal minimum when the validation "
+                        + "label is visible, otherwise the scrollbar appearance causes "
+                        + "a visible input stretch (min=" + minW + ", pref=" + prefW
+                        + ", delta=" + delta + ")");
+    }
+
     /** Constructs a (wizard / normal) panel on the EDT and returns it. */
     private static NodeConfigurationPanel buildPanel(boolean wizard) throws Exception {
         return buildPanel(wizard, null);

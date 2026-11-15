@@ -3417,35 +3417,36 @@ public class NodeConfigurationPanel extends JPanel {
         // Column 1 (labels): ABSOLUTE width 380, never shrinks (shrink 0).
         // Column 2 (inputs): grows and absorbs ALL shrink (shrink 100).
         // Column 3 (help buttons): content-sized.
-        // capMinimumWidth=false: the MigLayout's natural minimum (sum of
-        // component minimums) determines when the scrollbar appears — exactly
-        // when the inputs can no longer shrink further.
+        // capPreferredToMin=true so the panel's preferred width equals its
+        // minimum — when the JViewport stops tracking the viewport width
+        // (scrollbar appears), the view stays at minimum size and the input
+        // fields do not suddenly stretch.
         MigLayout layout = new MigLayout("fillx, insets 10, gap " + rowGap,
                 "[380!, shrink 0][grow, shrink 100][]", "");
-        return new ViewportWidthPanel(layout, false);
+        return new ViewportWidthPanel(layout, true);
     }
 
     private static final class ViewportWidthPanel extends JPanel implements Scrollable {
-        /** When true (non-wizard mode), the panel's minimum width is capped
-            so the JViewport keeps tracking the viewport width even when the
-            window is narrow. Without this cap the MigLayout's minimum (dominated
-            by the combo/ListEditor minimums) prevents the input column from
-            shrinking below ~280px. */
-        private final boolean capMinimumWidth;
+        /** When true (non-wizard mode), the panel's preferred width is capped
+            to its minimum. This prevents the JViewport from stretching the view
+            (and its input fields) when it stops tracking the viewport width and
+            sizes the view to its preferred size — the scrollbar appears without
+            a visible layout jump. */
+        private final boolean capPreferredToMin;
 
-        private ViewportWidthPanel(LayoutManager layout, boolean capMinimumWidth) {
+        private ViewportWidthPanel(LayoutManager layout, boolean capPreferredToMin) {
             super(layout);
-            this.capMinimumWidth = capMinimumWidth;
+            this.capPreferredToMin = capPreferredToMin;
         }
 
         @Override
-        public Dimension getMinimumSize() {
-            Dimension superMin = super.getMinimumSize();
-            if (capMinimumWidth) {
-                // label(380) + usable input(~120) + help(~20) + gaps(10) + insets(20) ≈ 550
-                return new Dimension(Math.min(superMin.width, 550), superMin.height);
+        public Dimension getPreferredSize() {
+            Dimension pref = super.getPreferredSize();
+            if (capPreferredToMin) {
+                Dimension min = getMinimumSize();
+                return new Dimension(Math.min(pref.width, min.width), pref.height);
             }
-            return superMin;
+            return pref;
         }
 
         @Override
