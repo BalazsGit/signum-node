@@ -3481,10 +3481,20 @@ public class NodeConfigurationPanel extends JPanel {
         } else {
             // Non-wizard (console) mode: the row inputs use MigLayout 'growx',
             // so they always shrink to fit the available width. A horizontal
-            // scrollbar is never needed — and after a CardLayout switch
-            // (search clear) a stale viewport extent could trigger a spurious
-            // one. Disabling it makes the layout self-correcting.
+            // scrollbar is never needed.
             scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+            // The JViewport's ViewportLayout (which sizes the view to
+            // max(view.pref, viewport.width)) is not always triggered when the
+            // scroll pane resizes in the live layout chain. Force it via a
+            // ComponentListener so the view actually shrinks/grows with the
+            // window.
+            javax.swing.JViewport vp = scrollPane.getViewport();
+            scrollPane.addComponentListener(new java.awt.event.ComponentAdapter() {
+                @Override
+                public void componentResized(java.awt.event.ComponentEvent e) {
+                    vp.doLayout();
+                }
+            });
         }
         return scrollPane;
     }
