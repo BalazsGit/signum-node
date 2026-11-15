@@ -3413,21 +3413,11 @@ public class NodeConfigurationPanel extends JPanel {
                     "[][grow]", "");
             return new ViewportWidthPanel(layout);
         }
-        // Non-wizard: 3 explicit columns so the input occupies a single
-        // shrinkable column and the help button has its own column.
-        // The JViewport sizes its view to max(view.getPreferredSize().width,
-        // viewport.getWidth()); overriding getPreferredSize to report a small
-        // width makes the viewport always stretch the panel to its own width,
-        // and the MigLayout 'growx/shrink' column fills (or compresses) inputs.
+        // Non-wizard: 3 explicit columns. The input column is the only one
+        // that grows and shrinks; labels and help buttons are content-sized.
         MigLayout layout = new MigLayout("fillx, insets 10, gap " + rowGap,
                 "[][grow, shrink][]", "");
-        return new JPanel(layout) {
-            @Override
-            public Dimension getPreferredSize() {
-                Dimension d = super.getPreferredSize();
-                return new Dimension(Math.min(d.width, 200), d.height);
-            }
-        };
+        return new JPanel(layout);
     }
 
     private static final class ViewportWidthPanel extends JPanel implements Scrollable {
@@ -3595,6 +3585,16 @@ public class NodeConfigurationPanel extends JPanel {
                                 propertyComboText(prop, comboBox)));
             }
             ConfigurationUtils.fixComponentSize(comboBox);
+            if (!wizardMode) {
+                // Cap the preferred width so the panel's preferred size stays
+                // small enough for the JViewport to stretch it to the viewport
+                // width. The 'growx' MigLayout constraint then fills the input
+                // to the available space; without this cap the viewport would
+                // keep the panel at its wide preferred width (prototype-based)
+                // and the input column could never shrink.
+                Dimension cp = comboBox.getPreferredSize();
+                comboBox.setPreferredSize(new Dimension(80, cp.height));
+            }
             inputComponent = comboBox;
             if (!comboBox.isEditable()) {
                 // the state-aware factory already wired the renderer of the editable case
@@ -3614,6 +3614,10 @@ public class NodeConfigurationPanel extends JPanel {
             // state's baseline values (the saved and/or applied value), so the
             // user can pick a baseline back in one click.
             JComboBox<String> comboBox = createStateAwareValueCombo(prop, savedValue, null);
+            if (!wizardMode) {
+                Dimension cp = comboBox.getPreferredSize();
+                comboBox.setPreferredSize(new Dimension(80, cp.height));
+            }
             inputComponent = comboBox;
             valueSuppliers.put(prop.getName(),
                     () -> ConfigurationUtils.propertyValueFromEditing(
@@ -4315,6 +4319,10 @@ public class NodeConfigurationPanel extends JPanel {
 
         // Fix dimensions to match standard text fields (consistent with addProperty)
         ConfigurationUtils.fixComponentSize(passwordField);
+        if (!wizardMode) {
+            Dimension cp = passwordField.getPreferredSize();
+            passwordField.setPreferredSize(new Dimension(80, cp.height));
+        }
 
         passwordField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             public void insertUpdate(javax.swing.event.DocumentEvent e) {
