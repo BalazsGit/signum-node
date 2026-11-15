@@ -3407,9 +3407,27 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private JPanel createCategoryPanel(int rowGap) {
+        if (wizardMode) {
+            // Wizard: original 2-column layout with split-based input spanning.
+            MigLayout layout = new MigLayout("fillx, insets 10, gap " + rowGap,
+                    "[][grow]", "");
+            return new ViewportWidthPanel(layout);
+        }
+        // Non-wizard: 3 explicit columns so the input occupies a single
+        // shrinkable column and the help button has its own column.
+        // The JViewport sizes its view to max(view.getPreferredSize().width,
+        // viewport.getWidth()); overriding getPreferredSize to report a small
+        // width makes the viewport always stretch the panel to its own width,
+        // and the MigLayout 'growx/shrink' column fills (or compresses) inputs.
         MigLayout layout = new MigLayout("fillx, insets 10, gap " + rowGap,
-                "[][grow, shrink]", "");
-        return wizardMode ? new ViewportWidthPanel(layout) : new JPanel(layout);
+                "[][grow, shrink][]", "");
+        return new JPanel(layout) {
+            @Override
+            public Dimension getPreferredSize() {
+                Dimension d = super.getPreferredSize();
+                return new Dimension(Math.min(d.width, 200), d.height);
+            }
+        };
     }
 
     private static final class ViewportWidthPanel extends JPanel implements Scrollable {
@@ -3630,9 +3648,13 @@ public class NodeConfigurationPanel extends JPanel {
         }
 
         updateColor(inputComponent, prop.getName(), getSafeDefault(prop));
-        row.inputConstraints = inputComponent instanceof JCheckBox
-                ? "split 2, height pref!"
-                : "split " + (portRestoreButton == null ? 2 : 3) + ", growx, wmin 0, height pref!";
+        if (wizardMode) {
+            row.inputConstraints = inputComponent instanceof JCheckBox
+                    ? "split 2, height pref!"
+                    : "split " + (portRestoreButton == null ? 2 : 3) + ", growx, height pref!";
+        } else {
+            row.inputConstraints = "growx, wmin 0, height pref!";
+        }
         panel.add(inputComponent, row.inputConstraints);
         if (portRestoreButton != null) {
             panel.add(portRestoreButton, row.extraConstraints);
@@ -4323,7 +4345,7 @@ public class NodeConfigurationPanel extends JPanel {
             }
         });
         updateColor(passwordField, prop.getName(), getSafeDefault(prop));
-        row.inputConstraints = "split 2, growx, wmin 0, height pref!";
+        row.inputConstraints = wizardMode ? "split 2, growx, height pref!" : "growx, wmin 0, height pref!";
         panel.add(passwordField, row.inputConstraints);
 
         // Help Button
