@@ -3674,7 +3674,7 @@ public class NodeConfigurationPanel extends JPanel {
             row.extra = portRestoreButton;
             row.extraConstraints = "hidemode 3";
             row.validation = portValidationLabel;
-            row.validationConstraints = "skip 1, span 2, growx, wrap, hidemode 3";
+            row.validationConstraints = "skip 1, span 2, growx, wmin 0, wrap, hidemode 3";
         }
 
         updateColor(inputComponent, prop.getName(), getSafeDefault(prop));
