@@ -3469,6 +3469,13 @@ public class NodeConfigurationPanel extends JPanel {
             if (pref.width > WIZARD_TAB_MAX_PREF_WIDTH) {
                 scrollPane.setPreferredSize(new Dimension(WIZARD_TAB_MAX_PREF_WIDTH, pref.height));
             }
+        } else {
+            // Non-wizard (console) mode: the row inputs use MigLayout 'growx',
+            // so they always shrink to fit the available width. A horizontal
+            // scrollbar is never needed — and after a CardLayout switch
+            // (search clear) a stale viewport extent could trigger a spurious
+            // one. Disabling it makes the layout self-correcting.
+            scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         }
         return scrollPane;
     }
@@ -3624,7 +3631,7 @@ public class NodeConfigurationPanel extends JPanel {
         updateColor(inputComponent, prop.getName(), getSafeDefault(prop));
         row.inputConstraints = inputComponent instanceof JCheckBox
                 ? "split 2, height pref!"
-                : "split " + (portRestoreButton == null ? 2 : 3) + ", growx, wmin pref, height pref!";
+                : "split " + (portRestoreButton == null ? 2 : 3) + ", growx, height pref!";
         panel.add(inputComponent, row.inputConstraints);
         if (portRestoreButton != null) {
             panel.add(portRestoreButton, row.extraConstraints);
@@ -4315,7 +4322,7 @@ public class NodeConfigurationPanel extends JPanel {
             }
         });
         updateColor(passwordField, prop.getName(), getSafeDefault(prop));
-        row.inputConstraints = "split 2, growx, wmin pref, height pref!";
+        row.inputConstraints = "split 2, growx, height pref!";
         panel.add(passwordField, row.inputConstraints);
 
         // Help Button
