@@ -3443,8 +3443,8 @@ public class NodeConfigurationPanel extends JPanel {
         public Dimension getMinimumSize() {
             Dimension superMin = super.getMinimumSize();
             if (capMinimumWidth) {
-                // label(380) + tiny input + help(13) + gaps(10) + insets(20) ≈ 430
-                return new Dimension(Math.min(superMin.width, 430), superMin.height);
+                // label(380) + usable input(~120) + help(~20) + gaps(10) + insets(20) ≈ 550
+                return new Dimension(Math.min(superMin.width, 550), superMin.height);
             }
             return superMin;
         }
