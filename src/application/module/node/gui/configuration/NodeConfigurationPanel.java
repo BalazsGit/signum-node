@@ -3624,7 +3624,7 @@ public class NodeConfigurationPanel extends JPanel {
         updateColor(inputComponent, prop.getName(), getSafeDefault(prop));
         row.inputConstraints = inputComponent instanceof JCheckBox
                 ? "split 2, height pref!"
-                : "split " + (portRestoreButton == null ? 2 : 3) + ", growx, height pref!";
+                : "split " + (portRestoreButton == null ? 2 : 3) + ", growx, wmin pref, height pref!";
         panel.add(inputComponent, row.inputConstraints);
         if (portRestoreButton != null) {
             panel.add(portRestoreButton, row.extraConstraints);
@@ -4315,7 +4315,7 @@ public class NodeConfigurationPanel extends JPanel {
             }
         });
         updateColor(passwordField, prop.getName(), getSafeDefault(prop));
-        row.inputConstraints = "split 2, growx, height pref!";
+        row.inputConstraints = "split 2, growx, wmin pref, height pref!";
         panel.add(passwordField, row.inputConstraints);
 
         // Help Button
