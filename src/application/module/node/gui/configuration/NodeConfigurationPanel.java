@@ -3790,8 +3790,35 @@ public class NodeConfigurationPanel extends JPanel {
             restoreButton.setVisible(error != null);
         }
         if (validationLabel != null && validationLabel.getParent() != null) {
-            validationLabel.getParent().revalidate();
-            validationLabel.getParent().repaint();
+            // Preserve the horizontal scroll position across the layout change:
+            // toggling the validation label / restore button revalidates the
+            // panel, and the JViewport can reset the scroll offset to 0 (or max).
+            java.awt.Component parent = validationLabel.getParent();
+            final int savedScrollX;
+            {
+                int sx = -1;
+                for (java.awt.Component c = parent.getParent(); c != null; c = c.getParent()) {
+                    if (c instanceof JScrollPane sp) {
+                        sx = sp.getHorizontalScrollBar().getValue();
+                        break;
+                    }
+                }
+                savedScrollX = sx;
+            }
+            parent.revalidate();
+            parent.repaint();
+            if (savedScrollX >= 0) {
+                SwingUtilities.invokeLater(() -> {
+                    for (java.awt.Component c2 = parent.getParent(); c2 != null; c2 = c2.getParent()) {
+                        if (c2 instanceof JScrollPane sp2) {
+                            sp2.getHorizontalScrollBar().setValue(
+                                    Math.min(savedScrollX,
+                                            sp2.getHorizontalScrollBar().getMaximum()));
+                            break;
+                        }
+                    }
+                });
+            }
         }
     }
 
