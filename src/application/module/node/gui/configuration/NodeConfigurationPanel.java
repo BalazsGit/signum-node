@@ -3411,18 +3411,42 @@ public class NodeConfigurationPanel extends JPanel {
             // Wizard: original 2-column layout with split-based input spanning.
             MigLayout layout = new MigLayout("fillx, insets 10, gap " + rowGap,
                     "[][grow]", "");
-            return new ViewportWidthPanel(layout);
+            return new ViewportWidthPanel(layout, false);
         }
-        // Non-wizard: 3 explicit columns. The input column is the only one
-        // that grows and shrinks; labels and help buttons are content-sized.
+        // Non-wizard: 3 explicit columns.
+        // Column 1 (labels): ABSOLUTE width 380, never shrinks (shrink 0).
+        // Column 2 (inputs): grows and absorbs ALL shrink (shrink 100).
+        // Column 3 (help buttons): content-sized.
+        // capMinimumWidth=true so the JViewport keeps tracking the viewport
+        // width even when the window is narrow (the MigLayout's natural minimum
+        // is dominated by combo/ListEditor minimums and would prevent the
+        // input column from shrinking below ~280px).
         MigLayout layout = new MigLayout("fillx, insets 10, gap " + rowGap,
-                "[][grow, shrink][]", "");
-        return new JPanel(layout);
+                "[380!, shrink 0][grow, shrink 100][]", "");
+        return new ViewportWidthPanel(layout, true);
     }
 
     private static final class ViewportWidthPanel extends JPanel implements Scrollable {
-        private ViewportWidthPanel(LayoutManager layout) {
+        /** When true (non-wizard mode), the panel's minimum width is capped
+            so the JViewport keeps tracking the viewport width even when the
+            window is narrow. Without this cap the MigLayout's minimum (dominated
+            by the combo/ListEditor minimums) prevents the input column from
+            shrinking below ~280px. */
+        private final boolean capMinimumWidth;
+
+        private ViewportWidthPanel(LayoutManager layout, boolean capMinimumWidth) {
             super(layout);
+            this.capMinimumWidth = capMinimumWidth;
+        }
+
+        @Override
+        public Dimension getMinimumSize() {
+            Dimension superMin = super.getMinimumSize();
+            if (capMinimumWidth) {
+                // label(380) + tiny input + help(13) + gaps(10) + insets(20) ≈ 430
+                return new Dimension(Math.min(superMin.width, 430), superMin.height);
+            }
+            return superMin;
         }
 
         @Override
@@ -3478,24 +3502,10 @@ public class NodeConfigurationPanel extends JPanel {
             if (pref.width > WIZARD_TAB_MAX_PREF_WIDTH) {
                 scrollPane.setPreferredSize(new Dimension(WIZARD_TAB_MAX_PREF_WIDTH, pref.height));
             }
-        } else {
-            // Non-wizard (console) mode: the row inputs use MigLayout 'growx',
-            // so they always shrink to fit the available width. A horizontal
-            // scrollbar is never needed.
-            scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-            // The JViewport's ViewportLayout (which sizes the view to
-            // max(view.pref, viewport.width)) is not always triggered when the
-            // scroll pane resizes in the live layout chain. Force it via a
-            // ComponentListener so the view actually shrinks/grows with the
-            // window.
-            javax.swing.JViewport vp = scrollPane.getViewport();
-            scrollPane.addComponentListener(new java.awt.event.ComponentAdapter() {
-                @Override
-                public void componentResized(java.awt.event.ComponentEvent e) {
-                    vp.doLayout();
-                }
-            });
         }
+        // Non-wizard (console) mode: the default AS_NEEDED policy is fine —
+        // the row inputs use 'growx, shrink, wmin 0' so they always compress
+        // to fit the viewport and the content never overflows horizontally.
         return scrollPane;
     }
 
@@ -3646,6 +3656,13 @@ public class NodeConfigurationPanel extends JPanel {
             portValidationLabel.setFont(UIManager.getFont("Label.font"));
             portValidationLabel.setForeground(GuiColors.getContrastRed());
             portValidationLabel.setVisible(false);
+            // Zero the preferred/minimum width so the error label never
+            // inflates the input column's preferred size. The label still
+            // displays its (wrapped) text, but its width is driven entirely
+            // by the MigLayout cell, not by its own 32-char preferred size.
+            Dimension vp = portValidationLabel.getPreferredSize();
+            portValidationLabel.setPreferredSize(new Dimension(0, vp.height));
+            portValidationLabel.setMinimumSize(new Dimension(0, vp.height));
             portValidationLabels.put(prop.getName(), portValidationLabel);
 
             portRestoreButton = new JButton();
