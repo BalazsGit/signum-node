@@ -120,7 +120,7 @@ class NodeConfigurationPanelWizardModeTest {
     }
 
     @Test
-    @DisplayName("invalid ports show inline errors and restore saved or applied values")
+    @DisplayName("invalid ports show inline errors and reset to hardcoded default")
     void portValidationAndRestore() throws Exception {
         Properties appliedBaseline = new Properties();
         appliedBaseline.setProperty(Props.API_PORT.getName(), "8125");
@@ -153,10 +153,10 @@ class NodeConfigurationPanelWizardModeTest {
         Map<String, JButton> restoreButtons =
                 (Map<String, JButton>) readDeclaredField(panel, "portRestoreButtons");
         JButton restore = restoreButtons.get(Props.API_PORT.getName());
-        assertEquals("Set back to saved", restore.getToolTipText());
+        assertEquals("Reset to Default", restore.getToolTipText());
         SwingUtilities.invokeAndWait(restore::doClick);
-        assertEquals("8126", editor.getText(),
-                "restore uses the accepted value in the virtual profile");
+        assertEquals(String.valueOf(Props.API_PORT.getDefaultValue()), editor.getText(),
+                "reset to default uses the hardcoded default value");
         assertFalse(restore.isVisible());
 
         Properties saved = ((NodeProfile) readDeclaredField(panel, "savedProfile")).getProperties();
@@ -164,8 +164,8 @@ class NodeConfigurationPanelWizardModeTest {
         SwingUtilities.invokeAndWait(() -> editor.setText("0"));
         assertPortInvalid(panel, apiPort, editor);
         SwingUtilities.invokeAndWait(restore::doClick);
-        assertEquals("8125", editor.getText(),
-                "when the saved profile has no explicit port, restore uses the applied baseline");
+        assertEquals(String.valueOf(Props.API_PORT.getDefaultValue()), editor.getText(),
+                "reset to default always uses the hardcoded default regardless of saved/applied");
     }
 
     @Test

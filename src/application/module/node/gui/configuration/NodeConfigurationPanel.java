@@ -1431,7 +1431,19 @@ public class NodeConfigurationPanel extends JPanel {
             return true;
         }
         String comboValue = rowComboSelectedText(row);
-        return comboValue != null && comboValue.toLowerCase(Locale.ROOT).contains(lowerQuery);
+        if (comboValue != null && comboValue.toLowerCase(Locale.ROOT).contains(lowerQuery)) {
+            return true;
+        }
+        // List editors (Allowed IPs, Admin Password, ...): search the individual items.
+        if (row.input instanceof ListEditor listEditor) {
+            for (JComboBox<String> combo : listEditor.itemFields) {
+                String itemText = stateAwareComboText(combo);
+                if (!itemText.isEmpty() && itemText.toLowerCase(Locale.ROOT).contains(lowerQuery)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /** @return the selected item of the row's NON-editable combo box as text,
@@ -1684,6 +1696,11 @@ public class NodeConfigurationPanel extends JPanel {
     private void highlightValueMatch(PropertyRow row, String query, Highlighter.HighlightPainter painter) {
         JTextComponent target = rowValueTextComponent(row);
         if (target == null) {
+            // ListEditor items: highlight each matching item's editor text
+            // component with the same document highlighter as value fields.
+            if (row.input instanceof ListEditor listEditor) {
+                highlightListEditorItems(listEditor, query, painter);
+            }
             return;
         }
         Object previous = searchValueHighlights.remove(target);
@@ -1700,6 +1717,43 @@ public class NodeConfigurationPanel extends JPanel {
                     target.getHighlighter().addHighlight(idx, idx + query.length(), painter));
         } catch (BadLocationException e) {
             // range outside the document bounds — nothing to highlight
+        }
+    }
+
+    /**
+     * Highlights the matching items inside a {@link ListEditor} using the
+     * document highlighter on each item's editor text component. ListEditor
+     * items are editable combos, so the band is painted via
+     * {@link javax.swing.text.Highlighter} on the editor's {@code JTextField}
+     * (the same mechanism as regular value fields).
+     */
+    private void highlightListEditorItems(ListEditor listEditor, String query,
+            Highlighter.HighlightPainter painter) {
+        String lowerQuery = query.toLowerCase(Locale.ROOT);
+        for (JComboBox<String> combo : listEditor.itemFields) {
+            if (combo.getEditor() == null) {
+                continue;
+            }
+            if (!(combo.getEditor().getEditorComponent() instanceof JTextComponent editor)) {
+                continue;
+            }
+            String itemText = editor.getText();
+            int idx = itemText.toLowerCase(Locale.ROOT).indexOf(lowerQuery);
+            if (idx < 0) {
+                continue;
+            }
+            // Remove any previous highlight on this editor
+            Object previous = searchValueHighlights.remove(editor);
+            if (previous != null) {
+                editor.getHighlighter().removeHighlight(previous);
+            }
+            try {
+                searchValueHighlights.put(editor,
+                        editor.getHighlighter().addHighlight(idx, idx + query.length(), painter));
+                editor.repaint();
+            } catch (BadLocationException e) {
+                // range outside the document bounds — nothing to highlight
+            }
         }
     }
 
@@ -3555,11 +3609,11 @@ public class NodeConfigurationPanel extends JPanel {
             portValidationLabels.put(prop.getName(), portValidationLabel);
 
             portRestoreButton = new JButton();
-            portRestoreButton.setToolTipText("Set back to saved");
+            portRestoreButton.setToolTipText("Reset to Default");
             ConfigurationUtils.styleProfileIconButton(portRestoreButton, FontAwesome.UNDO,
                     GuiColors.getButtonIcon(), GuiConstants.getToolBarIconSize());
             portRestoreButton.setVisible(false);
-            portRestoreButton.addActionListener(event -> restoreSavedPort(prop));
+            portRestoreButton.addActionListener(event -> resetPortToDefault(prop));
             portRestoreButtons.put(prop.getName(), portRestoreButton);
             row.extra = portRestoreButton;
             row.extraConstraints = "hidemode 3";
@@ -3690,12 +3744,9 @@ public class NodeConfigurationPanel extends JPanel {
         return "WebSocket port";
     }
 
-    private void restoreSavedPort(Prop<?> prop) {
+    private void resetPortToDefault(Prop<?> prop) {
         String key = prop.getName();
-        String saved = savedProfile.getProperties().getProperty(key);
-        String value = saved != null
-                ? saved
-                : appliedProfile.getProperties().getProperty(key, getSafeDefault(prop));
+        String value = getSafeDefault(prop);
         JComponent input = propertyComponents.get(key);
         if (input instanceof JComboBox<?> comboBox && comboBox.isEditable()) {
             comboBox.getEditor().setItem(value);
