@@ -4,8 +4,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import javax.swing.SwingUtilities;
+import java.awt.Dimension;
 
+import application.module.node.gui.metrics.MetricsPanel;
 import application.module.node.profile.NodeProfile;
+import org.mockito.Mockito;
 
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -20,10 +23,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>a second {@code updateMetricsPanelState(true)} while a construction is in flight is a safe
  *       no-op — it must <b>not</b> start a second (wasteful) background build (resource guard),</li>
  *   <li>{@code disposeStaleMetricsPanel()} bumps the generation counter so an in-flight background
- *       build discards its now-stale result instead of installing it.</li>
+ *       build discards its now-stale result instead of installing it,</li>
+ *   <li>showing the metrics panel always OPENS its content ({@code setExpanded(true)}): the reveal
+ *       animation must expand to the full view, never just the collapsed header row.</li>
  * </ul>
  * Headless-safe: the panel is constructed but never shown, and the heavy build is never triggered
- * (the in-flight flag is seeded via reflection, so only the guard path runs).</p>
+ * (the in-flight flag / the panel itself are seeded via reflection, so only the guard and
+ * subsequent-show paths run).</p>
  */
 @DisplayName("NodeConsolePanel - MetricsPanel background-construction guard")
 class NodeConsolePanelMetricsPanelTest {
@@ -117,5 +123,38 @@ class NodeConsolePanelMetricsPanelTest {
 
         int after = (Integer) readField(panel, "metricsPanelGeneration");
         assertTrue(after > before, "dispose must invalidate any in-flight background construction");
+    }
+
+    @Test
+    @DisplayName("showing the metrics panel always opens its content (full view, not the collapsed header)")
+    void show_opensMetricsContent_notJustCollapsedHeader() throws Exception {
+        NodeConsolePanel panel = new NodeConsolePanel(null, new NodeProfile(name()));
+        // A pre-built (mocked) panel routes updateMetricsPanelState(true) to the
+        // subsequent-show path - no heavy background construction in the test.
+        MetricsPanel mp = Mockito.mock(MetricsPanel.class);
+        // runMetricsRevealAnimation measures the panel's preferred height as the
+        // animation target - a null (default mock) answer would NPE it.
+        Mockito.when(mp.getPreferredSize()).thenReturn(new Dimension(800, 300));
+        writeField(panel, "metricsPanel", mp);
+
+        invokeOnEdt(panel, "updateMetricsPanelState", Boolean.TRUE);
+
+        Mockito.verify(mp).setExpanded(true);
+        assertTrue((Boolean) readField(panel, "metricsExpanded"),
+                "the tracked expansion state must follow the opened panel");
+        waitForMetricsAnimatorStop(panel);
+    }
+
+    /** Pumps the EDT until the reveal/collapse animator has finished (timeout-safe). */
+    private static void waitForMetricsAnimatorStop(NodeConsolePanel panel) throws Exception {
+        long deadline = System.currentTimeMillis() + 3000;
+        while (System.currentTimeMillis() < deadline) {
+            if (readField(panel, "metricsPanelAnimator") == null) {
+                return;
+            }
+            SwingUtilities.invokeAndWait(() -> { });
+            Thread.sleep(10);
+        }
+        throw new AssertionError("the metrics reveal animator did not stop within the timeout");
     }
 }

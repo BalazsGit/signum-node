@@ -1,8 +1,16 @@
 package application.module.node.gui.metrics;
 
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
+
+import javax.swing.SwingUtilities;
+
+import application.utils.gui.CustomDrawingComponent;
+import application.utils.gui.CustomDrawings;
+import jiconfont.icons.font_awesome.FontAwesome;
+import jiconfont.swing.IconFontSwing;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -15,6 +23,11 @@ class MetricsPanelTest {
 
     private MetricsPanel.ExpansionListener testListener;
     private boolean lastExpansionState;
+
+    @BeforeAll
+    static void registerIconFont() {
+        IconFontSwing.register(FontAwesome.getIconFont());
+    }
 
     @BeforeEach
     void setUp() {
@@ -87,5 +100,74 @@ class MetricsPanelTest {
         trackingListener.onExpansionChanged(false);
         assertEquals(4, callCount[0]);
         assertFalse(states[0]);
+    }
+
+    /**
+     * Regression test for the chevron/state desync after a hide/show cycle:
+     * show panel (checkbox), collapse it (chevron), hide it (checkbox), show it
+     * again — the re-show's layout stabilisation used to reset the content to
+     * its natural (expanded) height while {@code isExpanded} and the chevron
+     * still said "collapsed", so a visibly open panel showed the downward
+     * "expand" chevron.
+     * <p>
+     * Invariant under test: the chevron ALWAYS offers "collapse" (up) while the
+     * panel is expanded and "expand" (down) while it is collapsed, and the
+     * layout stabilisation on re-show must not change the expansion state.
+     */
+    @Test
+    @DisplayName("re-showing a collapsed panel keeps the chevron and the content consistent")
+    void reshowKeepsChevronConsistentWithExpansionState() throws Exception {
+        // Heavy construction (4 JFreeChart sub-panels) - run once on the EDT,
+        // null context keeps the child panels in an empty (data-less) state.
+        final MetricsPanel[] holder = new MetricsPanel[1];
+        SwingUtilities.invokeAndWait(() -> holder[0] = new MetricsPanel(null, null));
+        MetricsPanel panel = holder[0];
+        try {
+            // 1) Show: fresh panel is expanded; the show path stabilises the layout.
+            final int[] expandedHeight = new int[1];
+            SwingUtilities.invokeAndWait(() -> {
+                panel.ensureLayoutStability();
+                expandedHeight[0] = panel.getPreferredSize().height;
+            });
+            assertTrue(panel.isExpanded(), "a fresh panel is expanded");
+            assertTrue(expandedHeight[0] > 60, "expanded content has a real height: " + expandedHeight[0]);
+            assertEquals(CustomDrawings.Chevron.UP, chevronOf(panel),
+                    "an expanded panel offers the collapse (up) chevron");
+
+            // 2) Collapse via the chevron path's end state, then 3) hide.
+            SwingUtilities.invokeAndWait(() -> {
+                panel.setExpanded(false);
+                panel.setVisible(false);
+            });
+            assertFalse(panel.isExpanded(), "the panel is collapsed");
+            assertEquals(CustomDrawings.Chevron.DOWN, chevronOf(panel),
+                    "a collapsed panel offers the expand (down) chevron");
+
+            // 4) Show again: the show path stabilises the layout before revealing.
+            final int[] collapsedHeight = new int[1];
+            SwingUtilities.invokeAndWait(() -> {
+                panel.setVisible(true);
+                panel.ensureLayoutStability();
+                collapsedHeight[0] = panel.getPreferredSize().height;
+            });
+
+            // Invariant: state and visuals agree after the hide/show cycle.
+            assertFalse(panel.isExpanded(), "the collapsed state survives a hide/show cycle");
+            assertEquals(CustomDrawings.Chevron.DOWN, chevronOf(panel),
+                    "the chevron still offers expand (down) after re-show");
+            assertTrue(collapsedHeight[0] < expandedHeight[0] / 2,
+                    "a collapsed panel stays collapsed after re-stabilisation: "
+                            + collapsedHeight[0] + " vs expanded " + expandedHeight[0]);
+        } finally {
+            SwingUtilities.invokeAndWait(panel::shutdown);
+        }
+    }
+
+    /**
+     * @param panel the metrics panel whose toggle tab (index 0) carries the chevron
+     * @return the chevron symbol currently drawn on the toggle tab
+     */
+    private static CustomDrawings.Symbol chevronOf(MetricsPanel panel) {
+        return ((CustomDrawingComponent) panel.getTabComponentAt(0)).getDrawing();
     }
 }

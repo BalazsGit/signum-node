@@ -3329,6 +3329,11 @@ public class NodeConsolePanel extends JPanel {
                             // Wire ExpansionListener so chevron toggle updates tracked state
                             metricsPanel.setExpansionListener(expanded -> NodeConsolePanel.this.metricsExpanded = expanded);
                             metricsPanel.init();
+                            // Showing always OPENS the panel (whatever the tracked
+                            // preference says) so the reveal animation expands to
+                            // the FULL content, not just the collapsed header.
+                            metricsExpanded = true;
+                            metricsPanel.setExpanded(true);
                             metricsPanel.setVisible(true);
                             metricsPanelWrapper.removeAll();
                             metricsPanelWrapper.add(mp, BorderLayout.CENTER);
@@ -3348,6 +3353,10 @@ public class NodeConsolePanel extends JPanel {
             } else {
                 // Subsequent show: just make visible again (panel and timers already alive)
                 metricsPanel.setVisible(true);
+                // Showing always OPENS the panel so the reveal animation expands
+                // to the FULL content, whatever the hide/show history was.
+                metricsExpanded = true;
+                metricsPanel.setExpanded(true);
             }
 
             // Layout-stabilise + run the expand animation (shared by the synchronous

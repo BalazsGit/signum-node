@@ -362,6 +362,51 @@ public class MetricsPanel extends JTabbedPane {
         toggleTab.repaint();
     }
 
+    /**
+     * Synchronously sets the panel's expanded/collapsed state (no animation),
+     * keeping the tracked state, the chevron direction, the wrapper heights and
+     * the tab selection mutually consistent.
+     * <p>
+     * Used when the panel (re)appears to re-apply the user's tracked expansion
+     * preference: whatever the show/hide history, the chevron must always offer
+     * "collapse" while the panel is expanded and "expand" while it is collapsed.
+     * A no-op when the panel already is in the requested state.
+     *
+     * @param expanded {@code true} to expand (content visible, chevron up),
+     *                 {@code false} to collapse (content hidden, chevron down)
+     */
+    public void setExpanded(boolean expanded) {
+        if (animationTimer != null && animationTimer.isRunning()) {
+            animationTimer.stop();
+        }
+        if (isExpanded == expanded) {
+            return;
+        }
+        isExpanded = expanded;
+        if (expansionListener != null) {
+            expansionListener.onExpansionChanged(expanded);
+        }
+        toggleTab.setDrawing(expanded ? CustomDrawings.Chevron.UP : CustomDrawings.Chevron.DOWN);
+        if (expanded) {
+            setWrappersHeight(null);
+            if (getSelectedIndex() == 0) {
+                if (lastSelectedIndex > 0 && lastSelectedIndex < getTabCount()) {
+                    setSelectedIndex(lastSelectedIndex);
+                } else {
+                    setSelectedIndex(1);
+                }
+            }
+        } else {
+            setWrappersHeight(0);
+            if (getSelectedIndex() != 0) {
+                lastSelectedIndex = getSelectedIndex();
+                setSelectedIndex(0);
+            }
+        }
+        revalidate();
+        repaint();
+    }
+
     private void setWrappersHeight(Integer height) {
         updateWrapperHeight(syncWrapper, syncPanel, height);
         updateWrapperHeight(blockGenWrapper, blockGenPanel, height);
@@ -419,13 +464,23 @@ public class MetricsPanel extends JTabbedPane {
      * ensuring the animation system has consistent data regardless of when the user
      * interacts with the chevron toggle.
      * 
-     * Think of this as: "After initialization, ensure the panel is in the same state
-     * as if it had been collapsed and expanded once."
+     * Think of this as: "After initialization, ensure the panel is in the same
+     * state it was left in — fully expanded or fully collapsed — with stable
+     * wrapper sizes."
+     * <p>
+     * The reset follows the CURRENT expansion state: natural (unconstrained) size
+     * when expanded, zero height when collapsed. Resetting a collapsed panel to
+     * its natural size desynced the state — on the next show after a hide the
+     * content came back fully visible while {@code isExpanded} (and the chevron)
+     * still said "collapsed", leaving a visibly open panel with the downward
+     * "expand" chevron.
      */
     public void ensureLayoutStability() {
-        // Step 1: Reset all wrappers to their natural (unconstrained) preferred size.
-        // This ensures no residual height constraints from previous animation states.
-        setWrappersHeight(null);
+        // Step 1: Reset all wrappers to the size of the CURRENT expansion state:
+        // natural (unconstrained) when expanded, 0 when collapsed. This removes
+        // residual height constraints from previous animation states without
+        // expanding a collapsed panel.
+        setWrappersHeight(isExpanded ? null : 0);
 
         // Step 2: Force a synchronous layout pass on the entire hierarchy.
         // validate() propagates upward through parent containers; doLayout() computes

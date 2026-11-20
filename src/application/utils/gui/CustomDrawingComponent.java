@@ -27,6 +27,16 @@ public class CustomDrawingComponent extends JComponent {
         }
     }
 
+    /**
+     * Returns the symbol currently painted by this component.
+     *
+     * @return the current {@link Symbol} (e.g. a {@link CustomDrawings.Chevron}
+     *         variant), or {@code null} when none is set
+     */
+    public Symbol getDrawing() {
+        return drawing;
+    }
+
     @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
