@@ -881,8 +881,6 @@ class SQLiteConfigurationPanelTest {
         assertEquals(dbProfile.getDbUrl(), stored.getProperty(Props.DB_URL.getName()));
         assertEquals("keep me", stored.getProperty("node.description"));
         assertTrue(Files.readString(nodeProfileFile).contains("# retained comment"));
-        assertEquals(dbProfileName, SQLiteDatabaseAssignmentPanel.assignedProfile(
-                stored.getProperty(Props.DB_URL.getName())));
         assertEquals(List.of(nodeProfileName), SQLiteDatabaseAssignmentPanel.assignedNodeProfiles(
                 temporaryConfRoot.toString(), dbProfileName));
 
@@ -907,22 +905,24 @@ class SQLiteConfigurationPanelTest {
     }
 
     @Test
-    @DisplayName("custom SQLite assignments show the resolved database file path")
-    void customAssignmentDisplaysDatabaseFilePath() throws Exception {
-        temporaryConfRoot = Files.createTempDirectory("sqlite-custom-assignment-conf");
-        String nodeProfileName = "node_custom";
-        Path nodeProfileFile = PropertiesProfileLoader.resolveProfileFile(
-                temporaryConfRoot.toString(), ModuleIds.NODE, ModuleIds.CATEGORY_PROFILES, nodeProfileName);
-        Files.createDirectories(nodeProfileFile.getParent());
+    @DisplayName("assignments are driven by the discovered SQLite profiles; a foreign URL is not listed")
+    void foreignUrlIsNotListedWithoutADiscoveredProfile() throws Exception {
+        String dbProfileName = "test_sqlite_foreign_" + System.nanoTime();
+        createdProfile = Path.of(DatabaseConfigurationUtils.DATABASE_BASE_DIR, "SQLite", dbProfileName)
+                .toAbsolutePath().normalize();
+        new SQLiteProfile(dbProfileName).saveToProfileJson();
+        Files.createDirectories(createdProfile);
+        Files.createFile(createdProfile.resolve("foreign.db"));
 
-        Path databaseFile = temporaryConfRoot.resolve("external").resolve("custom.sqlite.db");
-        String url = application.module.node.profile.SqliteDatabasePaths.composeUrl(
-                databaseFile.getParent(), databaseFile.getFileName().toString());
-        Properties properties = new Properties();
-        properties.setProperty(Props.DB_URL.getName(), url);
-        try (var writer = Files.newBufferedWriter(nodeProfileFile)) {
-            properties.store(writer, null);
-        }
+        temporaryConfRoot = Files.createTempDirectory("sqlite-foreign-url-conf");
+        createAssignmentNodeProfile("node_listed",
+                application.module.node.profile.SqliteDatabasePaths.composeUrl(createdProfile, "foreign.db"));
+        // Points outside the discovered profiles - there is nothing on the
+        // SQLite side to list it under, so it stays out of the tab.
+        Path externalFile = temporaryConfRoot.resolve("external").resolve("custom.sqlite.db");
+        createAssignmentNodeProfile("node_external",
+                application.module.node.profile.SqliteDatabasePaths.composeUrl(
+                        externalFile.getParent(), externalFile.getFileName().toString()));
 
         AtomicReference<SQLiteDatabaseAssignmentPanel> assignments = new AtomicReference<>();
         SwingUtilities.invokeAndWait(() ->
@@ -931,27 +931,465 @@ class SQLiteConfigurationPanelTest {
         Field tableField = SQLiteDatabaseAssignmentPanel.class.getDeclaredField("table");
         tableField.setAccessible(true);
         JTable table = (JTable) tableField.get(assignments.get());
-        assertEquals(2, table.getColumnCount());
-        assertEquals("Profile", table.getColumnModel().getColumn(0).getHeaderValue());
-        assertEquals("Node/node_custom", table.getValueAt(0, 0));
-        assertEquals("(custom URL)", table.getValueAt(0, 1));
+        assertEquals(3, table.getColumnCount());
+        assertEquals("SQLite Profile", table.getColumnModel().getColumn(0).getHeaderValue());
+        assertEquals("Database File", table.getColumnModel().getColumn(1).getHeaderValue());
+        assertEquals("Assigned Module Profile", table.getColumnModel().getColumn(2).getHeaderValue());
+        assertEquals(1, table.getRowCount(), "only the discovered profile with a consumer is listed");
+        assertEquals(dbProfileName, table.getValueAt(0, 0));
+        assertEquals("foreign.db", table.getValueAt(0, 1));
+        assertEquals("Node/node_listed", table.getValueAt(0, 2));
         assertFalse(table.isCellEditable(0, 0), "the tab is read-only");
-        assertFalse(table.isCellEditable(0, 1), "the tab is read-only");
+        assertFalse(table.isCellEditable(0, 2), "the tab is read-only");
+    }
+
+    @Test
+    @DisplayName("a node without DB.Url is listed as a consumer of the built-in default database profile")
+    void blankDbUrlResolvesTheDefaultDatabaseProfile() throws Exception {
+        // The built-in default database lives in ./database/SQLite/sqlite -
+        // make the profile discoverable when the local workspace has no such
+        // folder yet (and clean up only what this test created).
+        Path sqliteProfileDir = Path.of(DatabaseConfigurationUtils.DATABASE_BASE_DIR, "SQLite", "sqlite");
+        boolean createdDefaultProfile = !Files.isDirectory(sqliteProfileDir);
+        if (createdDefaultProfile) {
+            Files.createDirectories(sqliteProfileDir);
+        }
+        try {
+            temporaryConfRoot = Files.createTempDirectory("sqlite-default-assignment-conf");
+            createAssignmentNodeProfile("node_default", null);
+
+            AtomicReference<SQLiteDatabaseAssignmentPanel> assignments = new AtomicReference<>();
+            SwingUtilities.invokeAndWait(() ->
+                    assignments.set(new SQLiteDatabaseAssignmentPanel(temporaryConfRoot.toString())));
+
+            Field tableField = SQLiteDatabaseAssignmentPanel.class.getDeclaredField("table");
+            tableField.setAccessible(true);
+            JTable table = (JTable) tableField.get(assignments.get());
+            // Every listed profile must be the built-in default one - the
+            // blank-URL node consumes no other profile. (One row per database
+            // file of the profile: the count depends on the local workspace's
+            // files, so assert on the cells, not the row count.)
+            for (int row = 0; row < table.getRowCount(); row++) {
+                Object profile = table.getValueAt(row, 0);
+                if (profile != null) {
+                    assertTrue(((String) profile).startsWith("sqlite"),
+                            "no other profile is listed: " + profile);
+                }
+            }
+            int consumerRow = -1;
+            for (int row = 0; row < table.getRowCount(); row++) {
+                if ("Node/node_default".equals(table.getValueAt(row, 2))) {
+                    consumerRow = row;
+                }
+            }
+            assertTrue(consumerRow >= 0,
+                    "the node is listed as a consumer of the built-in default profile");
+            assertEquals("signum.sqlite.db", table.getValueAt(consumerRow, 1),
+                    "the consumer row's file is the built-in default database");
+        } finally {
+            if (createdDefaultProfile) {
+                Files.deleteIfExists(sqliteProfileDir);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("a node without DB.Url counts as a user of the built-in default profile (lookup + rename)")
+    void blankDbUrlCountsAsDefaultAssignment() throws Exception {
+        temporaryConfRoot = Files.createTempDirectory("sqlite-blank-default-conf");
+        String nodeProfileName = "node_blank";
+        Path nodeProfileFile = PropertiesProfileLoader.resolveProfileFile(
+                temporaryConfRoot.toString(), ModuleIds.NODE, ModuleIds.CATEGORY_PROFILES, nodeProfileName);
+        Files.createDirectories(nodeProfileFile.getParent());
+        Files.writeString(nodeProfileFile, "node.description=blank url node\n");
+
+        // The reverse lookup counts the blank-URL node as a user of the
+        // built-in default profile - and of no other profile.
+        assertEquals(List.of(nodeProfileName),
+                SQLiteDatabaseAssignmentPanel.assignedNodeProfiles(temporaryConfRoot.toString(), "sqlite"));
+        assertTrue(SQLiteDatabaseAssignmentPanel.assignedNodeProfiles(
+                temporaryConfRoot.toString(), "some_other").isEmpty(),
+                "a blank DB.Url assigns no other profile");
+
+        // Renaming the default profile re-points the node (its URL is made
+        // explicit at the new location); unrelated properties stay intact.
+        SQLiteDatabaseAssignmentPanel.renameAssignments(
+                temporaryConfRoot.toString(), "sqlite", "sqlite_moved");
+        Properties stored = new Properties();
+        try (var reader = Files.newBufferedReader(nodeProfileFile)) {
+            stored.load(reader);
+        }
+        assertEquals("jdbc:sqlite:file:./database/SQLite/sqlite_moved/signum.sqlite.db",
+                stored.getProperty(Props.DB_URL.getName()));
+        assertEquals("blank url node", stored.getProperty("node.description"));
+    }
+
+    private void createAssignmentNodeProfile(String name, String databaseUrl) throws IOException {
+        Path nodeProfileFile = PropertiesProfileLoader.resolveProfileFile(
+                temporaryConfRoot.toString(), ModuleIds.NODE, ModuleIds.CATEGORY_PROFILES, name);
+        Files.createDirectories(nodeProfileFile.getParent());
+        Properties properties = new Properties();
+        properties.setProperty("node.description", name);
+        if (databaseUrl != null) {
+            properties.setProperty(Props.DB_URL.getName(), databaseUrl);
+        }
+        try (var writer = Files.newBufferedWriter(nodeProfileFile)) {
+            properties.store(writer, null);
+        }
+    }
+
+    @Test
+    @DisplayName("a discovered SQLite profile without an assigned module is not listed")
+    void profileWithoutAssignedModulesIsNotListed() throws Exception {
+        String dbProfileName = "test_sqlite_unassigned_" + System.nanoTime();
+        createdProfile = Path.of(DatabaseConfigurationUtils.DATABASE_BASE_DIR, "SQLite", dbProfileName)
+                .toAbsolutePath().normalize();
+        new SQLiteProfile(dbProfileName).saveToProfileJson();
+        Files.createDirectories(createdProfile);
+        Files.createFile(createdProfile.resolve("unassigned.db"));
+
+        temporaryConfRoot = Files.createTempDirectory("sqlite-unassigned-conf");
+
+        AtomicReference<SQLiteDatabaseAssignmentPanel> assignments = new AtomicReference<>();
+        SwingUtilities.invokeAndWait(() ->
+                assignments.set(new SQLiteDatabaseAssignmentPanel(temporaryConfRoot.toString())));
+
+        Field tableField = SQLiteDatabaseAssignmentPanel.class.getDeclaredField("table");
+        tableField.setAccessible(true);
+        JTable table = (JTable) tableField.get(assignments.get());
+        assertEquals(0, table.getRowCount(), "no module profile assigns the profile - it is not listed");
+    }
+
+    @Test
+    @DisplayName("multiple modules may share one profile and file; the rows merge per profile and per file")
+    void multipleModulesShareOneProfileAndFile() throws Exception {
+        String dbProfileName = "test_sqlite_multi_" + System.nanoTime();
+        createdProfile = Path.of(DatabaseConfigurationUtils.DATABASE_BASE_DIR, "SQLite", dbProfileName)
+                .toAbsolutePath().normalize();
+        new SQLiteProfile(dbProfileName).saveToProfileJson();
+        Files.createDirectories(createdProfile);
+        Files.createFile(createdProfile.resolve("alpha.db"));
+        Files.createFile(createdProfile.resolve("beta.db"));
+
+        temporaryConfRoot = Files.createTempDirectory("sqlite-multi-conf");
+        String alphaUrl = application.module.node.profile.SqliteDatabasePaths.composeUrl(createdProfile, "alpha.db");
+        String betaUrl = application.module.node.profile.SqliteDatabasePaths.composeUrl(createdProfile, "beta.db");
+        createAssignmentNodeProfile("node_x", alphaUrl);
+        createAssignmentNodeProfile("node_y", betaUrl);
+        createAssignmentNodeProfile("node_z", alphaUrl);
+
+        AtomicReference<SQLiteDatabaseAssignmentPanel> assignments = new AtomicReference<>();
+        SwingUtilities.invokeAndWait(() ->
+                assignments.set(new SQLiteDatabaseAssignmentPanel(temporaryConfRoot.toString())));
+
+        Field tableField = SQLiteDatabaseAssignmentPanel.class.getDeclaredField("table");
+        tableField.setAccessible(true);
+        JTable table = (JTable) tableField.get(assignments.get());
+        assertEquals(3, table.getRowCount(), "one row per consumer module");
+        assertEquals(dbProfileName, table.getValueAt(0, 0), "the profile cell starts the merged group");
+        assertNull(table.getValueAt(1, 0), "the group's continuation rows merge into the profile cell");
+        assertNull(table.getValueAt(2, 0), "the group's continuation rows merge into the profile cell");
+        assertEquals("alpha.db", table.getValueAt(0, 1), "the file cell starts its own merged block");
+        assertNull(table.getValueAt(1, 1), "both alpha.db consumers share the file cell");
+        assertEquals("beta.db", table.getValueAt(2, 1), "the second file starts a new block");
+        assertEquals("Node/node_x", table.getValueAt(0, 2));
+        assertEquals("Node/node_z", table.getValueAt(1, 2));
+        assertEquals("Node/node_y", table.getValueAt(2, 2));
+    }
+
+    @Test
+    @DisplayName("the merged profile/file cells keep the full table grid (inner borders drawn)")
+    void mergedCellsKeepTheFullTableGrid() throws Exception {
+        String dbProfileName = "test_sqlite_merge_" + System.nanoTime();
+        createdProfile = Path.of(DatabaseConfigurationUtils.DATABASE_BASE_DIR, "SQLite", dbProfileName)
+                .toAbsolutePath().normalize();
+        new SQLiteProfile(dbProfileName).saveToProfileJson();
+        Files.createDirectories(createdProfile);
+        Files.createFile(createdProfile.resolve("alpha.db"));
+        Files.createFile(createdProfile.resolve("beta.db"));
+
+        temporaryConfRoot = Files.createTempDirectory("sqlite-merge-conf");
+        String alphaUrl = application.module.node.profile.SqliteDatabasePaths.composeUrl(createdProfile, "alpha.db");
+        String betaUrl = application.module.node.profile.SqliteDatabasePaths.composeUrl(createdProfile, "beta.db");
+        createAssignmentNodeProfile("node_x", alphaUrl);
+        createAssignmentNodeProfile("node_y", betaUrl);
+        createAssignmentNodeProfile("node_z", alphaUrl);
+
+        AtomicReference<SQLiteDatabaseAssignmentPanel> assignments = new AtomicReference<>();
+        SwingUtilities.invokeAndWait(() ->
+                assignments.set(new SQLiteDatabaseAssignmentPanel(temporaryConfRoot.toString())));
+
+        Field tableField = SQLiteDatabaseAssignmentPanel.class.getDeclaredField("table");
+        tableField.setAccessible(true);
+        JTable table = (JTable) tableField.get(assignments.get());
+        // 3 rows: profile span 3, file spans 2 (alpha) + 1 (beta), the module
+        // column unmerged.
+        assertEquals(3, table.getRowCount());
+        Color gridColor = table.getGridColor();
+
+        final BufferedImage[] rendered = new BufferedImage[1];
+        SwingUtilities.invokeAndWait(() -> {
+            table.setSize(900, 300);
+            table.validate();
+            BufferedImage img = new BufferedImage(table.getWidth(), table.getHeight(),
+                    BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = img.createGraphics();
+            table.paint(g);
+            g.dispose();
+            rendered[0] = img;
+        });
+
+        // The grid is a FULL table grid: every row boundary carries a line in
+        // EVERY column - the merged profile / file cells keep their inner
+        // borders too (painted over the cells, so even a selected span's
+        // opaque fill does not hide them).
+        int boundary0 = table.getCellRect(0, 0, true).y + table.getCellRect(0, 0, true).height - 1;
+        assertTrue(hasGridLinePixel(rendered[0], boundary0, table.getCellRect(0, 0, false), gridColor),
+                "the inner border is drawn inside the merged profile cell");
+        assertTrue(hasGridLinePixel(rendered[0], boundary0, table.getCellRect(0, 1, false), gridColor),
+                "the inner border is drawn inside the merged file cell");
+        assertTrue(hasGridLinePixel(rendered[0], boundary0, table.getCellRect(0, 2, false), gridColor),
+                "the module column keeps its row border");
+
+        // The boundary below row 1 still lies inside the profile span, but it
+        // also separates the two file blocks: the full grid carries the line
+        // in all three columns.
+        int boundary1 = table.getCellRect(1, 0, true).y + table.getCellRect(1, 0, true).height - 1;
+        assertTrue(hasGridLinePixel(rendered[0], boundary1, table.getCellRect(1, 0, false), gridColor),
+                "the profile cell keeps the full grid across the file blocks");
+        assertTrue(hasGridLinePixel(rendered[0], boundary1, table.getCellRect(1, 1, false), gridColor),
+                "the file blocks keep the border between them");
+        assertTrue(hasGridLinePixel(rendered[0], boundary1, table.getCellRect(1, 2, false), gridColor),
+                "the module column keeps its row border");
+
+        // The column separators run the FULL table height (through the spans).
+        for (int column = 0; column < 3; column++) {
+            int x = table.getCellRect(0, column, true).x + table.getCellRect(0, column, true).width - 1;
+            int yTop = table.getCellRect(0, 0, true).y + 2;
+            int yBottom = table.getCellRect(2, 0, true).y + table.getCellRect(2, 0, true).height - 3;
+            int hits = 0;
+            for (int y = yTop; y < yBottom; y++) {
+                Color c = new Color(rendered[0].getRGB(x, y), true);
+                if (Math.abs(c.getRed() - gridColor.getRed()) <= 16
+                        && Math.abs(c.getGreen() - gridColor.getGreen()) <= 16
+                        && Math.abs(c.getBlue() - gridColor.getBlue()) <= 16) {
+                    hits++;
+                }
+            }
+            assertTrue(hits > (yBottom - yTop) / 2,
+                    "the vertical separator after column " + column + " runs the full height");
+        }
+    }
+
+    /**
+     * @return true when the pixel line at {@code y} inside the strip carries
+     *         most of the table's grid color (a painted horizontal grid line;
+     *         the strip's outer 4px are skipped to ignore the vertical lines)
+     */
+    private static boolean hasGridLinePixel(BufferedImage img, int y, java.awt.Rectangle strip, Color grid) {
+        int hits = 0;
+        for (int x = strip.x + 4; x < strip.x + strip.width - 4; x++) {
+            Color c = new Color(img.getRGB(x, y), true);
+            if (Math.abs(c.getRed() - grid.getRed()) <= 16
+                    && Math.abs(c.getGreen() - grid.getGreen()) <= 16
+                    && Math.abs(c.getBlue() - grid.getBlue()) <= 16) {
+                hits++;
+            }
+        }
+        return hits > (strip.width - 8) / 2;
+    }
+
+    @Test
+    @DisplayName("the three columns stay evenly sized and the profile name survives a row selection")
+    void columnsStayEvenAndProfileNameSurvivesSelection() throws Exception {
+        // The built-in default profile (./database/SQLite/sqlite) drives the
+        // rows - make it discoverable when the local workspace has no such
+        // folder yet (and clean up only what this test created).
+        Path sqliteProfileDir = Path.of(DatabaseConfigurationUtils.DATABASE_BASE_DIR, "SQLite", "sqlite");
+        boolean createdDefaultProfile = !Files.isDirectory(sqliteProfileDir);
+        if (createdDefaultProfile) {
+            Files.createDirectories(sqliteProfileDir);
+        }
+        try {
+            temporaryConfRoot = Files.createTempDirectory("sqlite-even-columns-conf");
+            for (String name : List.of("node", "node_01", "node_02")) {
+                createAssignmentNodeProfile(name, null);
+            }
+
+            AtomicReference<SQLiteDatabaseAssignmentPanel> assignments = new AtomicReference<>();
+            SwingUtilities.invokeAndWait(() ->
+                    assignments.set(new SQLiteDatabaseAssignmentPanel(temporaryConfRoot.toString())));
+            SQLiteDatabaseAssignmentPanel panel = assignments.get();
+
+            Field tableField = SQLiteDatabaseAssignmentPanel.class.getDeclaredField("table");
+            tableField.setAccessible(true);
+            JTable table = (JTable) tableField.get(panel);
+            assertEquals("sqlite", table.getValueAt(0, 0), "the profile cell starts the merged group");
+
+            // Size and lay out the table directly (validate() does not
+            // propagate layout in a not-showing tree) and render it
+            // offscreen. doLayout() is the code path that distributes the
+            // width over the columns per the auto-resize mode.
+            final BufferedImage[] rendered = new BufferedImage[1];
+            SwingUtilities.invokeAndWait(() -> {
+                table.setSize(1200, 600);
+                table.doLayout();
+                BufferedImage img = new BufferedImage(1200, 600, BufferedImage.TYPE_INT_ARGB);
+                Graphics2D g = img.createGraphics();
+                table.paint(g);
+                g.dispose();
+                rendered[0] = img;
+            });
+
+            int width0 = table.getColumnModel().getColumn(0).getWidth();
+            int width1 = table.getColumnModel().getColumn(1).getWidth();
+            int width2 = table.getColumnModel().getColumn(2).getWidth();
+            assertTrue(Math.abs(width0 - width1) <= 4 && Math.abs(width1 - width2) <= 4,
+                    "the three columns stay evenly sized: " + width0 + "/" + width1 + "/" + width2);
+
+            java.awt.Rectangle profileStrip = table.getCellRect(0, 0, false);
+            profileStrip.height = table.getRowHeight(0) * table.getRowCount();
+            assertTrue(hasNonBackgroundPixels(rendered[0], profileStrip, table.getBackground()),
+                    "the profile cell shows the (top-aligned) profile name");
+
+            // Selection is PER-ROW: selecting the inner row highlights ONLY
+            // that row's band - the span's other rows stay on the table
+            // background - and the profile name in the span's first row
+            // stays visible.
+            final Color selectionBackground = table.getSelectionBackground();
+            SwingUtilities.invokeAndWait(() -> {
+                table.getSelectionModel().setSelectionInterval(1, 1);
+                BufferedImage img = new BufferedImage(table.getWidth(), table.getHeight(),
+                        BufferedImage.TYPE_INT_ARGB);
+                Graphics2D g = img.createGraphics();
+                table.paint(g);
+                g.dispose();
+                rendered[0] = img;
+            });
+            java.awt.Rectangle selectedBand = table.getCellRect(1, 0, false);
+            assertTrue(hasNearColorPixels(rendered[0], selectedBand, selectionBackground),
+                    "the selected row's band is painted with the selection background");
+            java.awt.Rectangle topBand = table.getCellRect(0, 0, false);
+            assertTrue(hasNearColorPixels(rendered[0], topBand, table.getBackground()),
+                    "the span's first row stays on the table background (only the selected row is highlighted)");
+            assertTrue(hasNonBackgroundPixels(rendered[0], topBand, table.getBackground()),
+                    "the top-aligned profile name stays visible");
+        } finally {
+            if (createdDefaultProfile) {
+                Files.deleteIfExists(sqliteProfileDir);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("every assigned-module row carries the question-mark details icon")
+    void everyModuleRowCarriesTheDetailsIcon() throws Exception {
+        // The built-in default profile (./database/SQLite/sqlite) drives the
+        // rows - make it discoverable when the local workspace has no such
+        // folder yet (and clean up only what this test created).
+        Path sqliteProfileDir = Path.of(DatabaseConfigurationUtils.DATABASE_BASE_DIR, "SQLite", "sqlite");
+        boolean createdDefaultProfile = !Files.isDirectory(sqliteProfileDir);
+        if (createdDefaultProfile) {
+            Files.createDirectories(sqliteProfileDir);
+        }
+        try {
+            temporaryConfRoot = Files.createTempDirectory("sqlite-details-icon-conf");
+            for (String name : List.of("node", "node_01", "node_02")) {
+                createAssignmentNodeProfile(name, null);
+            }
+
+            AtomicReference<SQLiteDatabaseAssignmentPanel> assignments = new AtomicReference<>();
+            SwingUtilities.invokeAndWait(() ->
+                    assignments.set(new SQLiteDatabaseAssignmentPanel(temporaryConfRoot.toString())));
+
+            Field tableField = SQLiteDatabaseAssignmentPanel.class.getDeclaredField("table");
+            tableField.setAccessible(true);
+            JTable table = (JTable) tableField.get(assignments.get());
+            int rowCount = table.getRowCount();
+            assertTrue(rowCount >= 3, "the three nodes are listed, one row each");
+
+            final BufferedImage[] rendered = new BufferedImage[1];
+            SwingUtilities.invokeAndWait(() -> {
+                table.setSize(1200, 600);
+                table.doLayout();
+                BufferedImage img = new BufferedImage(1200, 600, BufferedImage.TYPE_INT_ARGB);
+                Graphics2D g = img.createGraphics();
+                table.paint(g);
+                g.dispose();
+                rendered[0] = img;
+            });
+
+            // The details icon lives in the trailing strip of the module
+            // cell on EVERY row (not just the profile group's first one).
+            for (int row = 0; row < rowCount; row++) {
+                java.awt.Rectangle cell = table.getCellRect(row, 2, false);
+                java.awt.Rectangle strip =
+                        new java.awt.Rectangle(cell.x + cell.width - 40, cell.y, 37, cell.height);
+                assertTrue(hasNonBackgroundPixels(rendered[0], strip, table.getBackground()),
+                        "row " + row + " carries the details icon");
+            }
+        } finally {
+            if (createdDefaultProfile) {
+                Files.deleteIfExists(sqliteProfileDir);
+            }
+        }
+    }
+
+    /**
+     * @return true when the strip (inset 3px to skip grid lines) contains a
+     *         noticeable run of pixels that differ from the given color -
+     *         text or a differently filled cell
+     */
+    private static boolean hasNonBackgroundPixels(BufferedImage img, java.awt.Rectangle strip, Color background) {
+        int hits = 0;
+        for (int y = strip.y + 3; y < strip.y + strip.height - 3; y++) {
+            for (int x = strip.x + 3; x < strip.x + strip.width - 3; x++) {
+                Color c = new Color(img.getRGB(x, y), true);
+                if (Math.abs(c.getRed() - background.getRed()) > 24
+                        || Math.abs(c.getGreen() - background.getGreen()) > 24
+                        || Math.abs(c.getBlue() - background.getBlue()) > 24) {
+                    hits++;
+                }
+            }
+        }
+        return hits > 20;
+    }
+
+    /**
+     * @return true when most of the strip's pixels (inset 3px) carry the
+     *         given color - a filled cell
+     */
+    private static boolean hasNearColorPixels(BufferedImage img, java.awt.Rectangle strip, Color color) {
+        int near = 0;
+        int total = 0;
+        for (int y = strip.y + 3; y < strip.y + strip.height - 3; y++) {
+            for (int x = strip.x + 3; x < strip.x + strip.width - 3; x++) {
+                total++;
+                Color c = new Color(img.getRGB(x, y), true);
+                if (Math.abs(c.getRed() - color.getRed()) <= 16
+                        && Math.abs(c.getGreen() - color.getGreen()) <= 16
+                        && Math.abs(c.getBlue() - color.getBlue()) <= 16) {
+                    near++;
+                }
+            }
+        }
+        return near > total / 2;
     }
 
     @Test
     @DisplayName("the assignments search filters the rows and navigates the matches")
     void assignmentsSearchFiltersRowsAndNavigatesMatches() throws Exception {
+        String dbProfileName = "test_sqlite_search_" + System.nanoTime();
+        createdProfile = Path.of(DatabaseConfigurationUtils.DATABASE_BASE_DIR, "SQLite", dbProfileName)
+                .toAbsolutePath().normalize();
+        new SQLiteProfile(dbProfileName).saveToProfileJson();
+        Files.createDirectories(createdProfile);
+        Files.createFile(createdProfile.resolve("search.db"));
+
         temporaryConfRoot = Files.createTempDirectory("sqlite-assignment-search-conf");
+        String url = application.module.node.profile.SqliteDatabasePaths.composeUrl(createdProfile, "search.db");
         for (String name : List.of("alpha_one", "beta_two", "gamma_three")) {
-            Path nodeProfileFile = PropertiesProfileLoader.resolveProfileFile(
-                    temporaryConfRoot.toString(), ModuleIds.NODE, ModuleIds.CATEGORY_PROFILES, name);
-            Files.createDirectories(nodeProfileFile.getParent());
-            Properties properties = new Properties();
-            properties.setProperty("node.description", name);
-            try (var writer = Files.newBufferedWriter(nodeProfileFile)) {
-                properties.store(writer, null);
-            }
+            createAssignmentNodeProfile(name, url);
         }
 
         AtomicReference<SQLiteDatabaseAssignmentPanel> assignments = new AtomicReference<>();
@@ -964,13 +1402,23 @@ class SQLiteConfigurationPanelTest {
         JTable table = (JTable) tableField.get(panel);
         application.utils.gui.SearchMatchPanel searchPanel =
                 (application.utils.gui.SearchMatchPanel) getField(panel, "searchMatchPanel");
-        assertEquals(3, table.getRowCount());
+        assertEquals(3, table.getRowCount(), "one row per consumer module");
+        assertEquals(dbProfileName, table.getValueAt(0, 0), "the profile cell starts the merged group");
+        assertEquals("search.db", table.getValueAt(0, 1), "the file cell starts the merged block");
+        assertNull(table.getValueAt(1, 0), "the group's continuation rows merge into the profile cell");
+        assertNull(table.getValueAt(2, 0), "the group's continuation rows merge into the profile cell");
+        assertEquals("Node/alpha_one", table.getValueAt(0, 2));
+        assertEquals("Node/beta_two", table.getValueAt(1, 2));
+        assertEquals("Node/gamma_three", table.getValueAt(2, 2));
         assertEquals("", searchPanel.getMatchIndicatorText());
 
         // The text filters the rows and shows the current/total counter.
         SwingUtilities.invokeAndWait(() -> searchPanel.setSearchText("beta"));
         assertEquals(1, table.getRowCount(), "only the matching row stays visible");
-        assertEquals("Node/beta_two", table.getValueAt(0, 0));
+        assertEquals(dbProfileName, table.getValueAt(0, 0),
+                "the surviving row re-opens its merged cells (a span of one)");
+        assertEquals("search.db", table.getValueAt(0, 1));
+        assertEquals("Node/beta_two", table.getValueAt(0, 2));
         assertEquals("1/1", searchPanel.getMatchIndicatorText());
 
         // A broader query lists every match; navigation moves the active one.
@@ -994,16 +1442,17 @@ class SQLiteConfigurationPanelTest {
     @Test
     @DisplayName("the assignments search counts every occurrence as its own match and moves the strong band")
     void assignmentsSearchCountsEveryOccurrenceAndMovesTheBand() throws Exception {
+        String dbProfileName = "test_sqlite_occ_" + System.nanoTime();
+        createdProfile = Path.of(DatabaseConfigurationUtils.DATABASE_BASE_DIR, "SQLite", dbProfileName)
+                .toAbsolutePath().normalize();
+        new SQLiteProfile(dbProfileName).saveToProfileJson();
+        Files.createDirectories(createdProfile);
+        Files.createFile(createdProfile.resolve("occ.db"));
+
         temporaryConfRoot = Files.createTempDirectory("sqlite-assignment-occ-conf");
+        String url = application.module.node.profile.SqliteDatabasePaths.composeUrl(createdProfile, "occ.db");
         for (String name : List.of("node_a", "node_b")) {
-            Path nodeProfileFile = PropertiesProfileLoader.resolveProfileFile(
-                    temporaryConfRoot.toString(), ModuleIds.NODE, ModuleIds.CATEGORY_PROFILES, name);
-            Files.createDirectories(nodeProfileFile.getParent());
-            Properties properties = new Properties();
-            properties.setProperty("node.description", name);
-            try (var writer = Files.newBufferedWriter(nodeProfileFile)) {
-                properties.store(writer, null);
-            }
+            createAssignmentNodeProfile(name, url);
         }
 
         AtomicReference<SQLiteDatabaseAssignmentPanel> assignments = new AtomicReference<>();
@@ -1017,29 +1466,29 @@ class SQLiteConfigurationPanelTest {
         application.utils.gui.SearchMatchPanel searchPanel =
                 (application.utils.gui.SearchMatchPanel) getField(panel, "searchMatchPanel");
         @SuppressWarnings("unchecked")
-        Map<Integer, List<application.utils.gui.SearchMatchLabel.HighlightBand>> profileBands =
+        Map<Integer, List<application.utils.gui.SearchMatchLabel.HighlightBand>> moduleBands =
                 (Map<Integer, List<application.utils.gui.SearchMatchLabel.HighlightBand>>)
-                        getField(panel, "profileBands");
+                        getField(panel, "moduleBands");
 
-        // "Node/node_a" holds TWO occurrences of "node" (Node, node_a) and so
-        // does "Node/node_b": four real matches, not two rows.
+        // Each module cell "Node/node_a" / "Node/node_b" holds TWO occurrences
+        // of "node" (Node + node_a): two real matches per row, four in total.
         SwingUtilities.invokeAndWait(() -> searchPanel.setSearchText("node"));
         assertEquals("1/4", searchPanel.getMatchIndicatorText(),
                 "every occurrence of the query is its own match");
-        List<application.utils.gui.SearchMatchLabel.HighlightBand> firstRowBands =
-                profileBands.get(0);
-        assertEquals(2, firstRowBands.size(), "both occurrences of the cell carry a band");
-        assertEquals(GuiColors.getSearchActiveMatch(), firstRowBands.get(0).color(),
+        List<application.utils.gui.SearchMatchLabel.HighlightBand> cellBands = moduleBands.get(0);
+        assertEquals(2, cellBands.size(), "every occurrence of the cell carries a band");
+        assertEquals(2, moduleBands.get(1).size(), "the second row's cell carries its own bands");
+        assertEquals(GuiColors.getSearchActiveMatch(), cellBands.get(0).color(),
                 "the navigated occurrence carries the strong band");
-        assertEquals(GuiColors.getSearchMatch(), firstRowBands.get(1).color(),
-                "the other occurrence keeps the soft (selected) band");
+        assertEquals(GuiColors.getSearchMatch(), cellBands.get(1).color(),
+                "the other occurrences keep the soft (selected) band");
 
         // The bands must reach the RENDERED cell component — and the renderer
         // stays non-opaque, so the LAF's background fill cannot paint over
         // them and hide the match.
         SwingUtilities.invokeAndWait(() -> {
-            java.awt.Component cell = table.getCellRenderer(0, 0)
-                    .getTableCellRendererComponent(table, table.getValueAt(0, 0), false, false, 0, 0);
+            java.awt.Component cell = table.getCellRenderer(0, 2)
+                    .getTableCellRendererComponent(table, table.getValueAt(0, 2), false, false, 0, 2);
             assertFalse(cell.isOpaque(),
                     "a non-selected cell renderer is non-opaque so the band stays visible");
             List<application.utils.gui.SearchMatchLabel.HighlightBand> rendered =
@@ -1056,38 +1505,124 @@ class SQLiteConfigurationPanelTest {
         SwingUtilities.invokeAndWait(() -> navigateAssignments(panel, true));
         assertEquals("2/4", searchPanel.getMatchIndicatorText());
         assertEquals(GuiColors.getSearchMatch(),
-                profileBands.get(0).get(0).color(), "the previous occurrence keeps the soft band");
+                moduleBands.get(0).get(0).color(), "the previous occurrence keeps the soft band");
         assertEquals(GuiColors.getSearchActiveMatch(),
-                profileBands.get(0).get(1).color(), "the navigated occurrence carries the strong band");
-        assertEquals(GuiColors.getSearchMatch(),
-                profileBands.get(1).get(0).color(), "the next row's occurrence stays soft");
+                moduleBands.get(0).get(1).color(), "the navigated occurrence carries the strong band");
 
         // The navigation wraps around the whole occurrence list.
         SwingUtilities.invokeAndWait(() -> navigateAssignments(panel, false));
         assertEquals("1/4", searchPanel.getMatchIndicatorText(), "previous navigation wraps");
         assertEquals(GuiColors.getSearchActiveMatch(),
-                profileBands.get(0).get(0).color(), "the wrapped-to occurrence is strong again");
+                moduleBands.get(0).get(0).color(), "the wrapped-to occurrence is strong again");
 
         // Clearing removes every band and the counter.
         SwingUtilities.invokeAndWait(() -> searchPanel.setSearchText(""));
         assertEquals("", searchPanel.getMatchIndicatorText());
         assertEquals(2, table.getRowCount());
-        assertTrue(profileBands.isEmpty(), "the bands are cleared");
+        assertTrue(moduleBands.isEmpty(), "the bands are cleared");
+    }
+
+    @Test
+    @DisplayName("a selection change (band repaint) keeps the top-aligned name and highlights only the row")
+    void partialRepaintKeepsMergedCellText() throws Exception {
+        // The screenshot scenario: one profile, one file, three modules.
+        String dbProfileName = "test_sqlite_partial_" + System.nanoTime();
+        createdProfile = Path.of(DatabaseConfigurationUtils.DATABASE_BASE_DIR, "SQLite", dbProfileName)
+                .toAbsolutePath().normalize();
+        new SQLiteProfile(dbProfileName).saveToProfileJson();
+        Files.createDirectories(createdProfile);
+        Files.createFile(createdProfile.resolve("partial.db"));
+
+        temporaryConfRoot = Files.createTempDirectory("sqlite-assignment-partial-conf");
+        String url = application.module.node.profile.SqliteDatabasePaths.composeUrl(createdProfile, "partial.db");
+        for (String name : List.of("node", "node_01", "node_02")) {
+            createAssignmentNodeProfile(name, url);
+        }
+
+        AtomicReference<SQLiteDatabaseAssignmentPanel> assignments = new AtomicReference<>();
+        SwingUtilities.invokeAndWait(() ->
+                assignments.set(new SQLiteDatabaseAssignmentPanel(temporaryConfRoot.toString())));
+
+        Field tableField = SQLiteDatabaseAssignmentPanel.class.getDeclaredField("table");
+        tableField.setAccessible(true);
+        JTable table = (JTable) tableField.get(assignments.get());
+        assertEquals(3, table.getRowCount());
+        assertEquals(dbProfileName, table.getValueAt(0, 0), "the profile cell starts the merged group");
+
+        // A FULL paint: the profile name is TOP-aligned in the span's FIRST
+        // row; the span's continuation rows carry no value.
+        final BufferedImage[] full = new BufferedImage[1];
+        SwingUtilities.invokeAndWait(() -> {
+            table.setSize(1200, 300);
+            table.doLayout();
+            BufferedImage img = new BufferedImage(table.getWidth(), table.getHeight(),
+                    BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = img.createGraphics();
+            table.paint(g);
+            g.dispose();
+            full[0] = img;
+        });
+        java.awt.Rectangle firstRowCell = table.getCellRect(0, 0, false);
+        assertTrue(hasNonBackgroundPixels(full[0], firstRowCell, table.getBackground()),
+                "the full paint shows the profile name in the span's first row (top-aligned)");
+
+        Color selectionBackground = table.getSelectionBackground();
+
+        // A selection change repaints ONLY the changed row band. Select the
+        // MIDDLE (span continuation) row and simulate its clipped band paint
+        // exactly as the viewport would: the band shows the row's OWN
+        // selection highlight, never the whole span.
+        final BufferedImage[] partial = new BufferedImage[1];
+        SwingUtilities.invokeAndWait(() -> {
+            table.getSelectionModel().setSelectionInterval(1, 1);
+            java.awt.Rectangle band = table.getCellRect(1, 0, false);
+            BufferedImage img = new BufferedImage(table.getWidth(), table.getHeight(),
+                    BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = img.createGraphics();
+            g.setClip(0, band.y, table.getWidth(), band.height);
+            table.paint(g);
+            g.dispose();
+            partial[0] = img;
+        });
+        java.awt.Rectangle bandProfileCell = table.getCellRect(1, 0, false);
+        assertTrue(hasNearColorPixels(partial[0], bandProfileCell, selectionBackground),
+                "the continuation row's band is painted selected on its own (per-row selection)");
+
+        // Select the FIRST row (the row that carries the name) and repaint
+        // only its band: the name must survive the band repaint (the old bug
+        // erased the merged cell's text into the background fill).
+        SwingUtilities.invokeAndWait(() -> {
+            table.getSelectionModel().setSelectionInterval(0, 0);
+            java.awt.Rectangle band = table.getCellRect(0, 0, false);
+            BufferedImage img = new BufferedImage(table.getWidth(), table.getHeight(),
+                    BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = img.createGraphics();
+            g.setClip(0, band.y, table.getWidth(), band.height);
+            table.paint(g);
+            g.dispose();
+            partial[0] = img;
+        });
+        java.awt.Rectangle topBand = table.getCellRect(0, 0, false);
+        assertTrue(hasNearColorPixels(partial[0], topBand, selectionBackground),
+                "the first row's band is painted selected");
+        assertTrue(hasNonBackgroundPixels(partial[0], topBand, selectionBackground),
+                "the profile name survives the band repaint");
     }
 
     @Test
     @DisplayName("under the app's LAF the search band stays behind the text in the taller table row")
     void assignmentsSearchBandCoversTheTextInFlatLafTable() throws Exception {
+        String dbProfileName = "test_sqlite_band_" + System.nanoTime();
+        createdProfile = Path.of(DatabaseConfigurationUtils.DATABASE_BASE_DIR, "SQLite", dbProfileName)
+                .toAbsolutePath().normalize();
+        new SQLiteProfile(dbProfileName).saveToProfileJson();
+        Files.createDirectories(createdProfile);
+        Files.createFile(createdProfile.resolve("band.db"));
+
         temporaryConfRoot = Files.createTempDirectory("sqlite-assignment-band-conf");
+        String url = application.module.node.profile.SqliteDatabasePaths.composeUrl(createdProfile, "band.db");
         for (String name : List.of("node", "node_01", "node_02")) {
-            Path nodeProfileFile = PropertiesProfileLoader.resolveProfileFile(
-                    temporaryConfRoot.toString(), ModuleIds.NODE, ModuleIds.CATEGORY_PROFILES, name);
-            Files.createDirectories(nodeProfileFile.getParent());
-            Properties properties = new Properties();
-            properties.setProperty("node.description", name);
-            try (var writer = Files.newBufferedWriter(nodeProfileFile)) {
-                properties.store(writer, null);
-            }
+            createAssignmentNodeProfile(name, url);
         }
 
         final javax.swing.LookAndFeel previousLaf = UIManager.getLookAndFeel();
@@ -1114,7 +1649,7 @@ class SQLiteConfigurationPanelTest {
             final BufferedImage[] rendered = new BufferedImage[1];
             SwingUtilities.invokeAndWait(() -> {
                 searchPanel.setSearchText("node");
-                assertEquals(3, table.getRowCount());
+                assertEquals(3, table.getRowCount(), "one row per consumer module");
                 assertEquals("1/6", searchPanel.getMatchIndicatorText());
                 table.setSize(900, 300);
                 table.validate();
@@ -1127,7 +1662,7 @@ class SQLiteConfigurationPanelTest {
             });
 
             for (int row = 0; row < table.getRowCount(); row++) {
-                java.awt.Rectangle cell = table.getCellRect(row, 0, true);
+                java.awt.Rectangle cell = table.getCellRect(row, 2, true);
                 int[] glyph = scanCellRows(rendered[0], cell, true);
                 int[] band = scanCellRows(rendered[0], cell, false);
                 assertTrue(band[1] >= 0, "row " + row + " carries a search band");
