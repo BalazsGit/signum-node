@@ -99,7 +99,7 @@ public final class SignumSchemeRegistrar extends CefAppHandlerAdapter {
                 /* isServiceWorkerEnabled */ false,
                 /* isCacheControlled */ false);
         if (!ok) {
-            logger.error("Failed to register the '{}' custom scheme — signum:// pages will not load",
+            logger.error("Failed to register the '{}' custom scheme - signum:// pages will not load",
                     BrowserSchemeHandler.SCHEME);
         } else {
             logger.debug("Registered the '{}' custom scheme (standard) in the current process",

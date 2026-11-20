@@ -70,7 +70,7 @@ public final class SystemCommandsHandler implements CommandHandler {
         if (registry != null) {
             for (CommandSpec spec : registry.all()) {
                 String argHint = spec.minArgs() > 0 ? " <args>" : (spec.maxArgs() > 0 ? " [args]" : "");
-                String desc = spec.description() != null ? "  — " + spec.description() : "";
+                String desc = spec.description() != null ? "  - " + spec.description() : "";
                 out.add("  " + spec.key() + argHint + desc);
                 if (spec.requiresOwner()) {
                     out.add("                     (owner required)");

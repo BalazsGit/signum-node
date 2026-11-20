@@ -377,7 +377,7 @@ public final class Signum {
                     profile.getName());
         } catch (Throwable t) {
             this.logger = BOOTSTRAP_LOGGER;
-            logger.warn("Failed to create the isolated node LoggerContext for profile '{}' — "
+            logger.warn("Failed to create the isolated node LoggerContext for profile '{}' - "
                     + "node logging stays on the legacy chain: {}", profile.getName(), t.getMessage());
             this.nodeLoggingContext = null;
             this.nodeLoggers = null;
@@ -433,7 +433,7 @@ public final class Signum {
     public synchronized void refreshConfiguration() {
         NodeProfile reloaded = NodeProfileRepository.loadByName(this.profile.getName());
         if (reloaded == null) {
-            logger.debug("refreshConfiguration('{}'): no on-disk profile — keeping current config",
+            logger.debug("refreshConfiguration('{}'): no on-disk profile - keeping current config",
                     this.profile.getName());
             return;
         }
@@ -535,7 +535,7 @@ public final class Signum {
         String r = (reason == null || reason.isBlank()) ? "resource conflict" : reason;
         ProfileLogger pl = this.profileLogger;
         if (pl != null && !pl.isClosed()) {
-            pl.error("Start rejected — " + r);
+            pl.error("Start rejected - " + r);
         }
         logger.warn("Start rejected for profile '{}': {}", getProfileName(), r);
     }
@@ -1035,7 +1035,7 @@ public final class Signum {
         Path confRoot = PathUtils.resolvePath(confFolder);
         module.start();
         if (module.size() == 0) {
-            BOOTSTRAP_LOGGER.info("No autostart profile registered — starting default profile '{}'", PROPERTIES_NAME);
+            BOOTSTRAP_LOGGER.info("No autostart profile registered - starting default profile '{}'", PROPERTIES_NAME);
             module.startNode(PROPERTIES_NAME, confRoot);
         }
     }
@@ -1155,7 +1155,7 @@ public final class Signum {
                     this.profile.getName(), this.nodeLoggingContext.configUri());
             return true;
         } catch (Throwable t) {
-            logger.warn("Failed to apply the full node logging configuration for profile '{}' — "
+            logger.warn("Failed to apply the full node logging configuration for profile '{}' - "
                     + "keeping the previous configuration: {}", this.profile.getName(), t.getMessage());
             return false;
         }

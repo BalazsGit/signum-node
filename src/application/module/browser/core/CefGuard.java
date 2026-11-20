@@ -102,7 +102,7 @@ public final class CefGuard {
         BrowserSettings settings = repository.load();
 
         if (settings.isCefDisabled()) {
-            logger.warn("The CEF engine is disabled in the browser settings (repeated fatal crashes) — "
+            logger.warn("The CEF engine is disabled in the browser settings (repeated fatal crashes) - "
                     + "the browser will be unavailable; re-enable with \"cefDisabled\": false in settings.json");
             writeMarker(cefLog(confPath));
             return new Result(List.of(), true);
@@ -113,7 +113,7 @@ public final class CefGuard {
             if (settings.isSingleProcess()) {
                 settings.setCefDisabled(true);
                 repository.save(settings);
-                logger.error("The previous CEF run crashed fatally even in single-process mode — disabling the "
+                logger.error("The previous CEF run crashed fatally even in single-process mode - disabling the "
                         + "browser engine (the application keeps running). Re-enable with \"cefDisabled\": false "
                         + "in conf/browser/settings.json after the underlying problem is fixed.");
                 writeMarker(cefLog(confPath));
@@ -122,12 +122,12 @@ public final class CefGuard {
             if (settings.isDisableGpu()) {
                 settings.setSingleProcess(true);
                 repository.save(settings);
-                logger.warn("The previous CEF run crashed fatally with GPU disabled — escalating to "
+                logger.warn("The previous CEF run crashed fatally with GPU disabled - escalating to "
                         + "--single-process (persisted)");
             } else {
                 settings.setDisableGpu(true);
                 repository.save(settings);
-                logger.warn("The previous CEF run crashed fatally (see {} in cef.log) — escalating to "
+                logger.warn("The previous CEF run crashed fatally (see {} in cef.log) - escalating to "
                         + "--disable-gpu (persisted)", FATAL_MARKER);
             }
         }
@@ -142,7 +142,7 @@ public final class CefGuard {
             // single-process mode avoids every subprocess. Transient on purpose:
             // NOT persisted, so a healthy machine is never permanently degraded.
             switches.add(SWITCH_SINGLE_PROCESS);
-            logger.warn("The OS refused to launch the CEF subprocess helper — using --single-process "
+            logger.warn("The OS refused to launch the CEF subprocess helper - using --single-process "
                     + "for this run only (not persisted)");
         }
         switches.addAll(filterForbidden(settings.getCefExtraArgs()));
@@ -165,7 +165,7 @@ public final class CefGuard {
                 new BrowserSettingsRepository(browserConfDir.resolve("settings.json"));
         BrowserSettings settings = repository.load();
         if (settings.isCefDisabled()) {
-            logger.warn("CEF fatal event — the engine is already disabled in settings; the restart will "
+            logger.warn("CEF fatal event - the engine is already disabled in settings; the restart will "
                     + "start without the browser");
             return;
         }
@@ -178,7 +178,7 @@ public final class CefGuard {
         }
         repository.save(settings);
         logger.error("CEF fatal event escalated the browser settings (disableGpu={}, singleProcess={}, "
-                        + "cefDisabled={}) — a restart will apply the new configuration",
+                        + "cefDisabled={}) - a restart will apply the new configuration",
                 settings.isDisableGpu(), settings.isSingleProcess(), settings.isCefDisabled());
     }
 

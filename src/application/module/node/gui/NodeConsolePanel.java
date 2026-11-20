@@ -2807,7 +2807,7 @@ public class NodeConsolePanel extends JPanel {
         // (start pending) — skip; the GUI already shows the STARTING transition
         // (spinner + disabled Start) via the NodeModule pending set.
         if (NodeModule.getInstance().isStartPending(this.profileName)) {
-            nodeContextLogger().info("Start already pending for profile '{}' — skipping startSignumWithGUI", profileName);
+            nodeContextLogger().info("Start already pending for profile '{}' - skipping startSignumWithGUI", profileName);
             return;
         }
         Signum ctx = null;
@@ -2844,7 +2844,7 @@ public class NodeConsolePanel extends JPanel {
         attachProfileLogger();
         loadGuiSettings();
         if (this.signum == null) {
-            nodeContextLogger().warn("startSignumWithGUI: no Signum available for profile '{}' — skipping runtime settings", profileName);
+            nodeContextLogger().warn("startSignumWithGUI: no Signum available for profile '{}' - skipping runtime settings", profileName);
             return;
         }
         try {
@@ -3120,7 +3120,7 @@ public class NodeConsolePanel extends JPanel {
                 // runs the processor must exist. A null here is a genuine bug, not a
                 // transient startup state — surface it as an error. Do NOT mark this
                 // instance as wired.
-                nodeContextLogger().error("[{}] ensureRuntimeWiring: invariant violation — BlockchainProcessor is null in state RUNNING", profileName);
+                nodeContextLogger().error("[{}] ensureRuntimeWiring: invariant violation - BlockchainProcessor is null in state RUNNING", profileName);
                 return;
             }
             // v4 toolbar-start path: the feature flags (measurement/experimental/
@@ -3152,7 +3152,7 @@ public class NodeConsolePanel extends JPanel {
                 // configuration here.
                 configureFeatureIndicators(processor);
             });
-            nodeLogger().info("[" + profileName + "] Runtime listeners wired — Latest block / peer / volume labels active");
+            nodeLogger().info("[" + profileName + "] Runtime listeners wired - Latest block / peer / volume labels active");
         } catch (Exception e) {
             nodeContextLogger().error("[{}] ensureRuntimeWiring failed", profileName, e);
         }
@@ -3181,7 +3181,7 @@ public class NodeConsolePanel extends JPanel {
         StringBuilder message = new StringBuilder("✔ '").append(profileName).append("' node is running");
         try {
             if (bound.getBlockchain() != null && bound.getBlockchain().getLastBlock() != null) {
-                message.append(" — block height: ").append(bound.getBlockchain().getLastBlock().getHeight());
+                message.append(" - block height: ").append(bound.getBlockchain().getLastBlock().getHeight());
             }
         } catch (Exception e) {
             // Chain not fully available yet — the plain "running" line is enough.
@@ -3204,7 +3204,7 @@ public class NodeConsolePanel extends JPanel {
         if (bound != null) {
             return new MetricsPanel(parentFrame, new MetricsPanelContext(bound));
         }
-        nodeContextLogger().warn("[MetricsPanel] Created without profile context for profile '{}' (node not started yet) — data will not load until it is recreated", profileName);
+        nodeContextLogger().warn("[MetricsPanel] Created without profile context for profile '{}' (node not started yet) - data will not load until it is recreated", profileName);
         return new MetricsPanel(parentFrame, null);
     }
 
@@ -3225,7 +3225,7 @@ public class NodeConsolePanel extends JPanel {
             return;
         }
         if (metricsPanelAnimator != null && metricsPanelAnimator.isRunning()) {
-            nodeContextLogger().debug("[MetricsPanel] Animator running — stale panel will be recreated on next show");
+            nodeContextLogger().debug("[MetricsPanel] Animator running - stale panel will be recreated on next show");
             return;
         }
         try {
@@ -3245,7 +3245,7 @@ public class NodeConsolePanel extends JPanel {
             metricsPanelAnimator != null && metricsPanelAnimator.isRunning());
 
         if (metricsPanelAnimator != null && metricsPanelAnimator.isRunning()) {
-            nodeContextLogger().warn("[DEBUG-MetricsPanel] updateMetricsPanelState: ABORTING — animator already running!");
+            nodeContextLogger().warn("[DEBUG-MetricsPanel] updateMetricsPanelState: ABORTING - animator already running!");
             return;
         }
 
@@ -3274,7 +3274,7 @@ public class NodeConsolePanel extends JPanel {
             // live node instead of the stale instance.
             Signum boundForCheck = resolveBoundSignum();
             if (metricsPanel != null && boundForCheck != null && metricsPanel.getSignum() != boundForCheck) {
-                nodeContextLogger().info("[MetricsPanel] Recreating panel — bound context {} does not match current Signum for profile '{}'",
+                nodeContextLogger().info("[MetricsPanel] Recreating panel - bound context {} does not match current Signum for profile '{}'",
                         metricsPanel.getSignum(), profileName);
                 disposeStaleMetricsPanel();
             }
@@ -4387,7 +4387,7 @@ public class NodeConsolePanel extends JPanel {
             profileLogger = ctx.getProfileLogger();
         }
         if (profileLogger == null) {
-            nodeContextLogger().warn("ProfileLogger not available for profile '{}' — node not yet started, deferring", profileName);
+            nodeContextLogger().warn("ProfileLogger not available for profile '{}' - node not yet started, deferring", profileName);
             return;
         }
 
@@ -4400,7 +4400,7 @@ public class NodeConsolePanel extends JPanel {
                 consoleMaxLines = NodeLoggingContextApplier.resolveConsoleMaxLines(
                         ctx.getConfFolder(), profileName);
             } catch (Exception e) {
-                nodeContextLogger().warn("Failed to resolve node console maxLines for '{}' — using default", profileName, e);
+                nodeContextLogger().warn("Failed to resolve node console maxLines for '{}' - using default", profileName, e);
             }
         }
         consoleSubscriber = new ProfileConsoleSubscriber(profileName, textPane.getStyledDocument(),
@@ -4519,7 +4519,7 @@ public class NodeConsolePanel extends JPanel {
 
             // When node becomes READY/RUNNING, ensure MetricsPanel visibility matches user preference
             if (newState == Signum.State.RUNNING) {
-                nodeContextLogger().debug("[MetricsPanel] Node reached {} — applying visibility preference: showMetricsPanel={}",
+                nodeContextLogger().debug("[MetricsPanel] Node reached {} - applying visibility preference: showMetricsPanel={}",
                     newState, showMetricsPanel);
                 
                 if (showMetricsPanel) {
@@ -4538,7 +4538,7 @@ public class NodeConsolePanel extends JPanel {
                 if (showMetricsItem != null) {
                     boolean current = showMetricsItem.isSelected();
                     if (current != showMetricsPanel) {
-                        nodeContextLogger().warn("[MetricsPanel] Checkbox was inconsistent! Was={}, expected={} — fixing", 
+                        nodeContextLogger().warn("[MetricsPanel] Checkbox was inconsistent! Was={}, expected={} - fixing", 
                             current, showMetricsPanel);
                     }
                     showMetricsItem.setSelected(showMetricsPanel);
@@ -4547,7 +4547,7 @@ public class NodeConsolePanel extends JPanel {
 
             // When node stops, hide and shutdown MetricsPanel to release resources
             if (newState == Signum.State.STOPPED || newState == Signum.State.CREATED) {
-                nodeContextLogger().debug("[MetricsPanel] Node stopped — shutting down MetricsPanel");
+                nodeContextLogger().debug("[MetricsPanel] Node stopped - shutting down MetricsPanel");
                 // Restart-safe: clear the attach latch so the NEXT start can re-attach
                 // the (re-created) ProfileLogger. Without this, the first attach is a
                 // permanent latch and all logs after a stop/start cycle are lost.

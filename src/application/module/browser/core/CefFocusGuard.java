@@ -698,7 +698,7 @@ public final class CefFocusGuard {
         reassertInProgress = true;
         try {
             if (!reassertViaNativeSetFocus(window)) {
-                trace("reassert: native SetFocus unavailable — legacy AWT requestFocus() fallback");
+                trace("reassert: native SetFocus unavailable - legacy AWT requestFocus() fallback");
                 window.requestFocus();
             }
         } finally {

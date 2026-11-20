@@ -199,7 +199,7 @@ public final class BrowserEngine {
             try {
                 future.get(SHUTDOWN_INIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             } catch (TimeoutException e) {
-                logger.warn("Browser engine init did not finish within {} s — interrupting it",
+                logger.warn("Browser engine init did not finish within {} s - interrupting it",
                         SHUTDOWN_INIT_TIMEOUT_SECONDS);
                 initExecutor.shutdownNow();
             } catch (Exception e) {
@@ -336,7 +336,7 @@ public final class BrowserEngine {
                     if (region == null || !CefGuard.indicatesFatal(region)) {
                         continue;
                     }
-                    logger.error("A fatal CEF event was detected in {} right after the engine became READY — "
+                    logger.error("A fatal CEF event was detected in {} right after the engine became READY - "
                             + "the process is likely about to crash; escalating the browser settings and "
                             + "requesting a restart...", cefLog);
                     try {
@@ -352,7 +352,7 @@ public final class BrowserEngine {
                             logger.error("The restart request failed", e);
                         }
                     } else {
-                        logger.error("No restart requester is available — the application may crash now; the "
+                        logger.error("No restart requester is available - the application may crash now; the "
                                 + "next start will recover automatically with the escalated settings");
                     }
                     return;

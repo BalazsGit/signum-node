@@ -695,7 +695,7 @@ public class NodeToolbar extends JPanel {
         // path that reaches here before the EDT processed the disable (fast
         // double-click), so a duplicate start can never be queued.
         if (NodeModule.getInstance().isStartPending(profile.getName())) {
-            nodeContextLogger().info("Start already pending for profile: {} — ignoring toggle click", profile.getName());
+            nodeContextLogger().info("Start already pending for profile: {} - ignoring toggle click", profile.getName());
             return;
         }
         Signum signum = NodeModule.getInstance().get(profile.getName());

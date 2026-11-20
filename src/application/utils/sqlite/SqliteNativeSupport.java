@@ -60,7 +60,7 @@ public final class SqliteNativeSupport {
      */
     public static void prewarm() {
         if (ensureLoaded()) {
-            logger.info("SQLite JDBC native library ready (driver v{}) — SQLite features available",
+            logger.info("SQLite JDBC native library ready (driver v{}) - SQLite features available",
                     SQLiteJDBCLoader.getVersion());
         }
         // On failure ensureLoaded() already logged the ERROR with guidance.
@@ -101,7 +101,7 @@ public final class SqliteNativeSupport {
         logger.error(
                 "SQLite JDBC native library could not be loaded after {} attempts. All "
                         + "SQLite-based features (node database, browser history) are unavailable "
-                        + "for this session — restart the application to retry. "
+                        + "for this session - restart the application to retry. "
                         + "sqlite-jdbc latches a failed first load for the JVM's lifetime, so without "
                         + "this pre-warm the failure would surface later as a raw "
                         + "java.lang.UnsatisfiedLinkError. Possible causes: antivirus (e.g. Windows "

@@ -472,7 +472,7 @@ public class NodeModule implements Module {
         }
 
         if (target.isRunning()) {
-            LOGGER.debug("startNode('{}'): already RUNNING — no-op", profileName);
+            LOGGER.debug("startNode('{}'): already RUNNING - no-op", profileName);
             return target;
         }
 
@@ -501,7 +501,7 @@ public class NodeModule implements Module {
         synchronized (this) {
             conflict = findResourceConflict(target);
             if (conflict != null) {
-                LOGGER.warn("startNode('{}'): REJECTED — {}", profileName, conflict);
+                LOGGER.warn("startNode('{}'): REJECTED - {}", profileName, conflict);
                 target.reportStartRejected(conflict);
                 return target;
             }
@@ -522,7 +522,7 @@ public class NodeModule implements Module {
                 // already starting by the time this task executes.
                 if (target.isRunning() || target.getState() == Signum.State.STARTING
                         || target.getState() == Signum.State.STOPPING) {
-                    LOGGER.debug("startNode('{}'): already starting/running — skipping", profileName);
+                    LOGGER.debug("startNode('{}'): already starting/running - skipping", profileName);
                     return;
                 }
                 // Immediate user feedback: a "please wait" line in the profile console
@@ -531,7 +531,7 @@ public class NodeModule implements Module {
                 ProfileLogger profileLogger = target.getProfileLogger();
                 if (profileLogger != null) {
                     profileLogger.info(String.format(
-                            "→ '%s' node is loading — please wait (first start can take several minutes)...",
+                            "→ '%s' node is loading - please wait (first start can take several minutes)...",
                             profileName));
                 }
                 target.start();
@@ -572,7 +572,7 @@ public class NodeModule implements Module {
         }
         Signum signum = get(profileName);
         if (signum == null) {
-            LOGGER.debug("stopNode('{}'): not registered — no-op", profileName);
+            LOGGER.debug("stopNode('{}'): not registered - no-op", profileName);
             return null;
         }
         LOGGER.info("stopNode('{}'): queuing async stop on lifecycle thread", profileName);
@@ -647,13 +647,13 @@ public class NodeModule implements Module {
                     }
                 }
                 if (conflict != null) {
-                    LOGGER.warn("restartNode('{}'): REJECTED — {}", profileName, conflict);
+                    LOGGER.warn("restartNode('{}'): REJECTED - {}", profileName, conflict);
                     target.reportStartRejected(conflict);
                     return;
                 }
                 ProfileLogger profileLogger = target.getProfileLogger();
                 if (profileLogger != null) {
-                    profileLogger.info(String.format("→ '%s' node restarting — please wait…", profileName));
+                    profileLogger.info(String.format("→ '%s' node restarting - please wait…", profileName));
                 }
                 try {
                     target.start();
@@ -682,7 +682,7 @@ public class NodeModule implements Module {
     private NodeProfile resolveProfile(String profileName) {
         NodeProfile profile = NodeProfileRepository.loadByName(profileName);
         if (profile == null) {
-            LOGGER.debug("resolveProfile('{}'): profile system returned null — using name-only profile", profileName);
+            LOGGER.debug("resolveProfile('{}'): profile system returned null - using name-only profile", profileName);
             profile = new NodeProfile(profileName);
         }
         return profile;

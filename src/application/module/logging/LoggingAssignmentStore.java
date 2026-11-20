@@ -119,7 +119,7 @@ public final class LoggingAssignmentStore {
             try {
                 listener.run();
             } catch (Exception e) {
-                LOGGER.warn("A logging profile-change listener failed — removing it: {}", e.getMessage());
+                LOGGER.warn("A logging profile-change listener failed - removing it: {}", e.getMessage());
                 PROFILE_CHANGE_LISTENERS.remove(listener);
             }
         }

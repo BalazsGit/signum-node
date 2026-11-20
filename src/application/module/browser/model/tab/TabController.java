@@ -89,7 +89,7 @@ public final class TabController {
         Objects.requireNonNull(url, "url");
         int cap = maxTabs;
         if (cap > 0 && tabs.size() >= cap) {
-            logger.debug("Max-tabs cap ({}) reached — not opening {}", cap, url);
+            logger.debug("Max-tabs cap ({}) reached - not opening {}", cap, url);
             return null;
         }
         BrowserTab tab = new BrowserTab(url);
