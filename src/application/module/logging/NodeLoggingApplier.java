@@ -83,7 +83,7 @@ public final class NodeLoggingApplier {
                 if (node == null) {
                     // No live Signum instance: nothing to apply to right now —
                     // the next start() runs the full apply (doInitialize step 1.7).
-                    LOGGER.debug("No live Signum instance for node profile '{}' — "
+                    LOGGER.debug("No live Signum instance for node profile '{}' - "
                             + "the logging configuration takes effect at the next start", nodeProfile);
                     return;
                 }

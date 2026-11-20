@@ -177,7 +177,7 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
             setApplyConfirmationProvider((profileName, isDefault) -> nodeApplyMessage(profileName, isDefault));
             setApplyHook(name -> {
                 persistPerNodeAssignment(name);
-                LOGGER.info("Node logging profile '{}' applied for node profile '{}' — applying live (no restart)",
+                LOGGER.info("Node logging profile '{}' applied for node profile '{}' - applying live (no restart)",
                         name, nodeProfileName);
                 applyAction.run();
             });

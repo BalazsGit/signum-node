@@ -194,7 +194,7 @@ public final class DbContext {
 
                 if (isFreshDbError) {
                     logger().info(
-                            "Detected fresh database with pending migrations — skipping validation, proceeding to migrate...");
+                            "Detected fresh database with pending migrations - skipping validation, proceeding to migrate...");
                 } else {
                     // For other validation errors (e.g., checksum mismatch), ask for repair confirmation
                     if (repairConfirmationHandler.test(e.getMessage())) {

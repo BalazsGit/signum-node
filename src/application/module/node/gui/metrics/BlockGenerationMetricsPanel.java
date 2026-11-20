@@ -306,7 +306,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
         // normally. (ctx == null keeps the existing no-context fallback.)
         Signum signum = ctx != null ? ctx.getSignum() : null;
         if (signum != null && !signum.isRunning()) {
-            logger.warn("Node is not RUNNING — BlockGenerationMetricsPanel will show an empty state until the node is started");
+            logger.warn("Node is not RUNNING - BlockGenerationMetricsPanel will show an empty state until the node is started");
         } else {
             try {
                 // Initial update on EDT is fine as listeners aren't active yet
@@ -330,7 +330,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
             } catch (Exception e) {
                 // Defensive: the node may have stopped between the state check and
                 // the data load — degrade to an empty state instead of crashing the EDT.
-                logger.warn("Initial data load failed (node database unavailable?) — showing empty state", e);
+                logger.warn("Initial data load failed (node database unavailable?) - showing empty state", e);
             }
         }
         initListeners();

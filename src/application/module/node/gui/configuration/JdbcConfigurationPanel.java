@@ -812,7 +812,7 @@ public class JdbcConfigurationPanel extends JPanel {
                     refreshProfileList();
                 }
                 if (profileCombo.getItemCount() == 0) {
-                    LOGGER.warn("No {} database profile available — the link stays off", getEngine());
+                    LOGGER.warn("No {} database profile available - the link stays off", getEngine());
                     enableLink = false;
                 }
             }
@@ -873,7 +873,7 @@ public class JdbcConfigurationPanel extends JPanel {
             DatabaseConfigurationPanel.DatabaseEngine engine = parseEngine(engineName);
             if (engine == null || !profileMaterializes(confFolder, engine, profileName)) {
                 LOGGER.warn("Database link '{}' cannot be materialized (unknown engine or missing "
-                        + "profile) — falling back to manual mode", value);
+                        + "profile) - falling back to manual mode", value);
                 setLinkedInternal(false);
                 loadManual(preferredUrl, preferredUser, null);
                 applyModeVisibility();
@@ -933,7 +933,7 @@ public class JdbcConfigurationPanel extends JPanel {
                 applyLink(explicit, url, username);
                 return;
             }
-            LOGGER.warn("Recorded database link '{}' cannot be materialized — loading in manual mode",
+            LOGGER.warn("Recorded database link '{}' cannot be materialized - loading in manual mode",
                     explicit);
         }
         // SQLite derivation: the URL's directory names an existing profile

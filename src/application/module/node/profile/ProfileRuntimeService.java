@@ -211,7 +211,7 @@ public final class ProfileRuntimeService {
         if (!repo.hasProfile(ModuleIds.NODE, applied)) {
             // Stale marker (the applied profile was deleted since): seeding it
             // would record an unresolvable assignment — the built-in default applies.
-            LOGGER.warn("The applied logging profile '{}' of module '{}' no longer exists — no logging "
+            LOGGER.warn("The applied logging profile '{}' of module '{}' no longer exists - no logging "
                     + "assignment is seeded for new node profile '{}'", applied, ModuleIds.NODE, profileName);
             return;
         }
@@ -444,7 +444,7 @@ public final class ProfileRuntimeService {
         signum.addStateListener(waiter);
         try {
             if (!running.await(RUNNING_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                LOGGER.warn("Node '{}' did not reach RUNNING within {} s after rename — user pause not re-applied",
+                LOGGER.warn("Node '{}' did not reach RUNNING within {} s after rename - user pause not re-applied",
                         profileName, RUNNING_TIMEOUT_SECONDS);
                 return;
             }

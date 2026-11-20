@@ -116,13 +116,13 @@ public final class NodeLoggingContext {
      */
     public boolean reconfigure() {
         if (!isLoadableNodeConfig(this.configUri)) {
-            LOGGER.warn("reconfigure skipped for node '{}': config file {} is not a valid generated Log4j2 config — keeping the current configuration",
+            LOGGER.warn("reconfigure skipped for node '{}': config file {} is not a valid generated Log4j2 config - keeping the current configuration",
                     profileName, this.configUri);
             return false;
         }
         final PropertiesConfiguration configuration = buildValidatedConfiguration(this.configUri);
         if (configuration == null) {
-            LOGGER.warn("reconfigure skipped for node '{}': config file {} failed the full Log4j2 parse — keeping the current configuration",
+            LOGGER.warn("reconfigure skipped for node '{}': config file {} failed the full Log4j2 parse - keeping the current configuration",
                     profileName, this.configUri);
             return false;
         }
@@ -155,13 +155,13 @@ public final class NodeLoggingContext {
             throw new IllegalArgumentException("newConfigUri must not be null");
         }
         if (!isLoadableNodeConfig(newConfigUri)) {
-            LOGGER.warn("reconfigureFrom skipped for node '{}': target config file {} is not a valid generated Log4j2 config — keeping the current configuration",
+            LOGGER.warn("reconfigureFrom skipped for node '{}': target config file {} is not a valid generated Log4j2 config - keeping the current configuration",
                     profileName, newConfigUri);
             return false;
         }
         final PropertiesConfiguration configuration = buildValidatedConfiguration(newConfigUri);
         if (configuration == null) {
-            LOGGER.warn("reconfigureFrom skipped for node '{}': target config file {} failed the full Log4j2 parse — keeping the current configuration",
+            LOGGER.warn("reconfigureFrom skipped for node '{}': target config file {} failed the full Log4j2 parse - keeping the current configuration",
                     profileName, newConfigUri);
             return false;
         }

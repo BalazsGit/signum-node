@@ -59,7 +59,7 @@ public final class SandboxVerifier {
                 }
             });
             if (helperCommands.isEmpty()) {
-                logger.info("Sandbox check (S7): no {} process found yet (subprocesses start lazily) — not verified",
+                logger.info("Sandbox check (S7): no {} process found yet (subprocesses start lazily) - not verified",
                         HELPER_MARKER);
                 return;
             }
@@ -67,10 +67,10 @@ public final class SandboxVerifier {
                     .filter(cmd -> UNSAFE_SWITCHES.stream().anyMatch(cmd::contains))
                     .toList();
             if (!unsafe.isEmpty()) {
-                logger.warn("Sandbox check (S7): {} {} process(es) run with sandbox-disabling switches — "
+                logger.warn("Sandbox check (S7): {} {} process(es) run with sandbox-disabling switches - "
                         + "the renderer sandbox is NOT in effect: {}", unsafe.size(), HELPER_MARKER, unsafe);
             } else {
-                logger.info("Sandbox check (S7): {} {} process(es) running, no sandbox-disabling switches — "
+                logger.info("Sandbox check (S7): {} {} process(es) running, no sandbox-disabling switches - "
                         + "renderer sandbox in effect", helperCommands.size(), HELPER_MARKER);
             }
         } catch (Exception e) {

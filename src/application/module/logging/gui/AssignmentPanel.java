@@ -203,7 +203,7 @@ public class AssignmentPanel extends JPanel {
      */
     public void refreshIfSafe() {
         if (hasUnsavedRows()) {
-            LOGGER.debug("Skipping automatic assignments refresh — the table has unsaved changes");
+            LOGGER.debug("Skipping automatic assignments refresh - the table has unsaved changes");
             return;
         }
         refresh();

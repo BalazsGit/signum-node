@@ -82,7 +82,7 @@ public final class LaunchCommand {
         if (exactCommandLine.size() > 1) {
             LOGGER.info("Launch command captured (strategy: exact): {}", String.join(" ", exact));
         } else {
-            LOGGER.warn("Launch command captured WITHOUT arguments (the OS reported only the executable: {}) — "
+            LOGGER.warn("Launch command captured WITHOUT arguments (the OS reported only the executable: {}) - "
                             + "restart will use the reconstructed command (java -jar/-cp + main class + original args)",
                     exact.isEmpty() ? "<none>" : exact.get(0));
         }
@@ -160,7 +160,7 @@ public final class LaunchCommand {
         String classPath = System.getProperty("java.class.path", "");
         String[] entries = classPath.split(File.pathSeparator);
         if (entries.length == 0 || entries[0].isBlank()) {
-            throw new IllegalStateException("java.class.path is empty — cannot reconstruct the launch command");
+            throw new IllegalStateException("java.class.path is empty - cannot reconstruct the launch command");
         }
 
         List<String> command = new ArrayList<>();

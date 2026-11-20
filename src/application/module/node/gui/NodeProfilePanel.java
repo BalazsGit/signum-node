@@ -793,7 +793,7 @@ public class NodeProfilePanel extends JPanel {
     private void applyLoggingLive() {
         Signum node = NodeModule.getInstance().get(profile.getName());
         if (node == null || node.getState() != Signum.State.RUNNING) {
-            nodeContextLogger().info("Apply-logging for profile '{}': previous state {} — the node was not "
+            nodeContextLogger().info("Apply-logging for profile '{}': previous state {} - the node was not "
                     + "running, so it is not started (the saved logging profile takes "
                     + "effect at the next start)",
                     profile.getName(), node == null ? "unregistered" : node.getState());
@@ -810,7 +810,7 @@ public class NodeProfilePanel extends JPanel {
             throw new IllegalStateException("Failed to apply the live logging configuration for profile '"
                     + profile.getName() + "' - the node kept its previous configuration");
         }
-        nodeContextLogger().info("Node logging applied live for profile '{}' — no restart needed", profile.getName());
+        nodeContextLogger().info("Node logging applied live for profile '{}' - no restart needed", profile.getName());
     }
 
     public NodeProfile getProfile() { return profile; }

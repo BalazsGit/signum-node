@@ -160,7 +160,7 @@ public final class JcefProcessBootstrap {
             return;
         }
         if (jcefDir.isEmpty()) {
-            logger.warn("JCEF native distribution not found — the browser engine will report FAILED "
+            logger.warn("JCEF native distribution not found - the browser engine will report FAILED "
                     + "at initialization (run 'gradlew extractJcef' first)");
             return;
         }
@@ -174,7 +174,7 @@ public final class JcefProcessBootstrap {
         if (guard.engineDisabled()) {
             engineDisabled = true;
             logger.error("The browser engine stays OFF for this run (disabled after repeated fatal CEF "
-                    + "crashes) — the application continues without the browser");
+                    + "crashes) - the application continues without the browser");
             return;
         }
         if (!guard.switches().isEmpty()) {
@@ -214,7 +214,7 @@ public final class JcefProcessBootstrap {
                     + "run the blocking CEF initialization on the first createClient()");
         } catch (Throwable t) {
             // The engine's doInit() retries the remaining steps defensively.
-            logger.error("JCEF pre-initialization failed — the browser engine will attempt "
+            logger.error("JCEF pre-initialization failed - the browser engine will attempt "
                     + "a full initialization at start", t);
             preinitialized = false;
         }
@@ -229,14 +229,14 @@ public final class JcefProcessBootstrap {
     private static void runSubprocess(Path confPath, Optional<Path> jcefDir) {
         try {
             if (jcefDir.isEmpty()) {
-                System.err.println("CEF subprocess: JCEF native distribution not found — terminating");
+                System.err.println("CEF subprocess: JCEF native distribution not found - terminating");
                 System.exit(1);
             }
-            System.err.println("CEF subprocess detected — entering the CEF process loop");
+            System.err.println("CEF subprocess detected - entering the CEF process loop");
             ensureCefDir(confPath);
             JcefNativeLoader.install(jcefDir.get(), OsArch.current());
             if (!CefApp.startup(mainArgs)) {
-                System.err.println("CEF subprocess: JCEF startup failed — terminating");
+                System.err.println("CEF subprocess: JCEF startup failed - terminating");
                 System.exit(1);
             }
             CefApp.addAppHandler(new SignumSchemeRegistrar());
