@@ -171,9 +171,10 @@ public class SqliteDatabaseProfileWizard extends JDialog {
      * Creates the named SQLite database profile — or places a new database file
      * into an EXISTING profile — the single file-write entry point:
      * <ul>
-     *   <li>NEW profile name: writes {@code profile.json} with the composed
-     *       convention URL and ensures the data directory (SSOT:
-     *       {@link ProfileCreateDefaults#ensureSqliteDatabaseProfile});</li>
+     *   <li>NEW profile name: writes {@code profile.json} (engine settings only —
+     *       the database URL is derived, never stored; the node profile's
+     *       {@code DB.Url} is the SSOT of the assignment) and ensures the data
+     *       directory (SSOT: {@link ProfileCreateDefaults#ensureSqliteDatabaseProfile});</li>
      *   <li>EXISTING profile name: only ensures the file's directory — the
      *       profile's settings (profile.json) are left untouched; the new file
      *       becomes visible from the linked-mode file dropdown (it lists the

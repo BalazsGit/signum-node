@@ -32,7 +32,7 @@ A database profile is a folder under `./database/<Engine>/<profile>/`:
 
 | Engine | Profile identity | `profile.json` |
 |---|---|---|
-| **SQLite** (file-based) | the folder itself (the per-profile convention, `./database/SQLite/<profile>/`) | **optional** — carries tuning only (`DB.Url`, `DB.SqliteJournalMode`, `DB.SqliteCacheSize`); a folder without one is still a valid profile (the module materializes the file with its defaults on first save) |
+| **SQLite** (file-based) | the folder itself (the per-profile convention, `./database/SQLite/<profile>/`) | **optional** — carries tuning only (`DB.SqliteJournalMode`, `DB.SqliteCacheSize`); the database URL is a **derived** value (the convention directory + the active file) and is no longer stored here — an older `profile.json` may still carry a `DB.Url`, which is ignored (see `DB_SETUP_SQLITE.md`); a folder without one is still a valid profile (the module materializes the file with its defaults on first save) |
 | **MariaDB / PostgreSQL** (server-based) | the `profile.json` | **required** — it enumerates the databases created on the server (instances + credentials) |
 
 Consequence for link resolution (node configuration UI): a SQLite database link

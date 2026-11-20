@@ -2,9 +2,11 @@ package application.module.node.profile;
 
 import application.module.database.profile.SQLiteProfile;
 import application.module.node.props.Props;
+import application.utils.io.PathUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Properties;
 
@@ -32,16 +34,25 @@ public final class ProfileCreateDefaults {
 
     /**
      * Per-profile SQLite data directory (SSOT): {@code ./database/SQLite/<name>} (CWD-relative,
-     * the same base {@link #sqliteDbUrl} is derived from).
+     * the same base {@link #sqliteDbUrl} is derived from — delegates to
+     * {@link SqliteDatabasePaths#profileDir(String)}).
      */
     public static Path sqliteDataDir(String profileName) {
-        return Path.of("database", "SQLite", profileName);
+        return SqliteDatabasePaths.profileDir(profileName);
     }
 
     /** Default SQLite database file name used by per-profile databases. */
-    public static final String DEFAULT_SQLITE_FILE_NAME = "signum.sqlite.db";
+    public static final String DEFAULT_SQLITE_FILE_NAME = SqliteDatabasePaths.DEFAULT_DATABASE_FILE_NAME;
 
-    /** Per-profile SQLite JDBC URL (SSOT): {@code ./database/SQLite/<name>/signum.sqlite.db}. */
+    /**
+     * Per-profile SQLite JDBC URL (SSOT): {@code ./database/SQLite/<name>/signum.sqlite.db}.
+     * <p>
+     * String-form composition (no {@link Path} parsing): the wizard's preview
+     * passes a literal placeholder name ({@code "<name>"}) here, which must not
+     * throw. For a real profile name the result is bit-identical to
+     * {@code SqliteDatabasePaths.composeUrl(sqliteDataDir(name),
+     * DEFAULT_SQLITE_FILE_NAME)}.
+     */
     public static String sqliteDbUrl(String profileName) {
         return "jdbc:sqlite:file:./database/SQLite/" + profileName + "/" + DEFAULT_SQLITE_FILE_NAME;
     }
@@ -59,10 +70,17 @@ public final class ProfileCreateDefaults {
     /**
      * Creates (or updates) the SQLite database profile of the given name in the
      * database module's profile area ({@code ./database/SQLite/<name>/profile.json})
-     * pointing at the given JDBC URL, and ensures the database's own directory
-     * exists. This is the single rule both node-profile save paths apply (the
-     * configuration panel's save and the setup wizard): a new/changed SQLite
-     * configuration is discoverable as a database profile right after saving.
+     * for the given JDBC URL, and ensures the database's own directory exists. This
+     * is the single rule both node-profile save paths apply (the configuration
+     * panel's save and the setup wizard): a new/changed SQLite configuration is
+     * discoverable as a database profile right after saving.
+     * <p>
+     * The database profile stores its engine settings only (journal mode, cache
+     * size) — the database URL is NOT persisted there: the node profile's
+     * {@code DB.Url} property is the SSOT of the database assignment (see
+     * {@link SqliteDatabasePaths#assignmentProfileName}). An existing profile's
+     * settings survive the update (a stored {@code DB.Url} in its JSON is
+     * ignored and dropped on save).
      * <p>
      * Never throws (D17): an invalid name/URL or a write failure is logged and
      * swallowed — the node-profile save itself must never fail because of the
@@ -81,9 +99,9 @@ public final class ProfileCreateDefaults {
                 return;
             }
             SQLiteProfile profile = new SQLiteProfile(profileName.trim());
-            profile.getConfiguration().put(SQLiteProfile.CFG_URL, dbUrl);
+            profile.loadFromDisk();
             profile.saveToProfileJson();
-            profile.ensureDatabaseDirectory();
+            Files.createDirectories(PathUtils.resolvePath(parts.dir().toString()));
         } catch (Exception e) {
             logger.warn("Could not create/update the SQLite database profile '{}': {}",
                     profileName, e.toString());

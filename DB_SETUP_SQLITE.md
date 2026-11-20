@@ -31,6 +31,19 @@ DB.Username=
 DB.Password=
 ```
 
+## Database profiles and the `DB.Url` SSOT
+
+The node's `DB.Url` property (in its `node.properties`) is the **single source of truth** of the
+database assignment — the node opens exactly the database this URL points at. The database
+module's SQLite profiles are file-based by definition: the profile
+`./database/SQLite/<name>/` holds the `*.db` files (the filesystem is the source of truth for
+that list) and a `profile.json` with the **engine settings only** (`DB.SqliteJournalMode`,
+`DB.SqliteCacheSize`). The database URL of a profile is a **derived** value
+(`jdbc:sqlite:file:./database/SQLite/<name>/<first file>`), never a stored one — an older
+`profile.json` may still carry a `DB.Url`, which is ignored (no migration path) and dropped on
+the next save. There is no "file vs memory" storage option: an in-memory node database is not
+supported (a node would have to re-sync from scratch on every start).
+
 # Further Configuration
 
 ## Optimization

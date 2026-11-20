@@ -1,5 +1,6 @@
 package application.module.node.profile;
 
+import application.module.database.profile.SQLiteProfile;
 import application.module.database.utils.DatabaseConfigurationUtils;
 import application.module.node.props.Props;
 import application.utils.io.PathUtils;
@@ -107,7 +108,7 @@ class ProfileCreateDefaultsTest {
     // ------------------------------------------------------------------
 
     @Test
-    @DisplayName("ensureSqliteDatabaseProfile creates ./database/SQLite/<name>/profile.json pointing at the URL")
+    @DisplayName("ensureSqliteDatabaseProfile creates ./database/SQLite/<name>/profile.json (engine settings only — the URL is derived)")
     void ensureSqliteDatabaseProfileCreatesProfile() throws IOException {
         String name = "e2e_probe_" + System.nanoTime();
         Path dir = sqliteProfileDir(name);
@@ -118,7 +119,13 @@ class ProfileCreateDefaultsTest {
             Path profileJson = dir.resolve("profile.json");
             assertTrue(Files.isRegularFile(profileJson), "the profile.json must exist");
             JsonObject json = JsonParser.parseString(Files.readString(profileJson)).getAsJsonObject();
-            assertEquals(ProfileCreateDefaults.sqliteDbUrl(name), json.get("DB.Url").getAsString());
+            assertFalse(json.has(SQLiteProfile.CFG_URL),
+                    "the database URL must NOT be stored in the profile JSON (it is derived; the node profile's DB.Url is the SSOT)");
+            assertEquals("WAL", json.get(SQLiteProfile.CFG_JOURNAL_MODE).getAsString());
+            assertEquals("-131072", json.get(SQLiteProfile.CFG_CACHE_SIZE).getAsString());
+            assertEquals(ProfileCreateDefaults.sqliteDbUrl(name),
+                    new SQLiteProfile(name).getDbUrl(),
+                    "the derived URL of a fresh (file-less) profile is the per-profile default URL");
         } finally {
             deleteRecursively(dir);
         }

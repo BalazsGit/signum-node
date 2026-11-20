@@ -6,6 +6,8 @@ import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Insets;
+import java.util.ArrayList;
+import java.util.List;
 
 import javax.swing.JLabel;
 
@@ -50,6 +52,14 @@ public class SearchMatchLabel extends JLabel {
     private Color highlightColor;
 
     /**
+     * Multiple search-match bands on the NAME text, each with its own color
+     * (a superset of the single {@link #highlightStart}/{@link #highlightLength}
+     * band — e.g. the soft palette color on every plain match and the strong
+     * one on the navigated match).
+     */
+    private final List<HighlightBand> highlightBands = new ArrayList<>();
+
+    /**
      * The optional property key (e.g. {@code API.Port}) shown on the same
      * line, directly after the (human-readable) name, wrapped in angle
      * brackets and in the unified key style. {@code null} or empty = plain
@@ -73,6 +83,48 @@ public class SearchMatchLabel extends JLabel {
     }
 
     /**
+     * One search-match band on the NAME text with its own color.
+     *
+     * @param start  zero-based start offset of the range (inclusive)
+     * @param length number of characters in the range
+     * @param color  the band color, or {@code null} for the palette's
+     *               default search-match color
+     */
+    public record HighlightBand(int start, int length, Color color) {
+    }
+
+    /**
+     * Sets the search-match bands painted on the NAME text (each band in its
+     * own color — e.g. the soft palette color on every plain match and the
+     * strong one on the navigated match). Replaces every previous name-line
+     * band, including a single {@link #setHighlightRange(int, int)} one.
+     *
+     * @param bands the bands to paint (null treated as empty)
+     */
+    public void setHighlightBands(List<HighlightBand> bands) {
+        highlightBands.clear();
+        if (bands != null) {
+            highlightBands.addAll(bands);
+        }
+        this.highlightStart = -1;
+        this.highlightLength = 0;
+        repaint();
+    }
+
+    /** Removes every name-line band (the band list and the single range). */
+    public void clearHighlightBands() {
+        highlightBands.clear();
+        this.highlightStart = -1;
+        this.highlightLength = 0;
+        repaint();
+    }
+
+    /** @return the current name-line bands (a copy; empty when none) */
+    public List<HighlightBand> getHighlightBands() {
+        return List.copyOf(highlightBands);
+    }
+
+    /**
      * Highlights the character range {@code [start, start + length)} of the
      * current text with the palette's search-match color.
      *
@@ -85,10 +137,11 @@ public class SearchMatchLabel extends JLabel {
         repaint();
     }
 
-    /** Removes any highlight band. */
+    /** Removes any highlight band (the band list and the single range). */
     public void clearHighlight() {
         this.highlightStart = -1;
         this.highlightLength = 0;
+        highlightBands.clear();
         repaint();
     }
 
@@ -215,6 +268,9 @@ public class SearchMatchLabel extends JLabel {
         if (hasHighlight()) {
             paintHighlightBand(g, false);
         }
+        for (HighlightBand band : highlightBands) {
+            paintBand(g, band);
+        }
         if (hasKeyHighlight()) {
             paintHighlightBand(g, true);
         }
@@ -226,19 +282,25 @@ public class SearchMatchLabel extends JLabel {
 
     /**
      * Top Y of the (name) text's font box, mirroring the standard label UI
-     * vertical alignment math (vertical: 0 = top, 1 = center, 2 = bottom).
-     * The key text is vertically centered inside this box (see
-     * {@link #paintKeyText}).
+     * vertical alignment math (TOP / CENTER / BOTTOM). The key text is
+     * vertically centered inside this box (see {@link #paintKeyText}).
+     * <p>
+     * The alignment is compared against the NAMED constants (never hardcoded
+     * numbers): the SwingConstants values differ between JDK versions
+     * (on this toolchain's JDK CENTER=0/TOP=1/BOTTOM=3, on older JDKs
+     * CENTER=1/TOP=0/BOTTOM=2), so a magic number would silently take the
+     * wrong branch and misplace the band (e.g. top of a taller FlatLaf
+     * table cell while the LAF centers the text).
      */
     private int nameTextTopY(Graphics g) {
         FontMetrics baseFm = g.getFontMetrics(getFont());
         Insets in = getInsets();
         int viewHeight = getHeight() - in.top - in.bottom;
         int valign = getVerticalAlignment();
-        if (valign == 2) {
+        if (valign == BOTTOM) {
             return in.top + viewHeight - baseFm.getHeight();
         }
-        if (valign == 0) {
+        if (valign == TOP) {
             return in.top;
         }
         return in.top + (viewHeight - baseFm.getHeight()) / 2;
@@ -246,8 +308,12 @@ public class SearchMatchLabel extends JLabel {
 
     /**
      * Left X of the (name) text, mirroring the standard label UI horizontal
-     * alignment math (horizontal: 0 = left, 1 = center, 2 = right). The key
-     * text starts after this text plus {@link #KEY_TEXT_GAP} (same line).
+     * alignment math (LEFT/LEADING, CENTER, RIGHT/TRAILING). The key text
+     * starts after this text plus {@link #KEY_TEXT_GAP} (same line).
+     * <p>
+     * As in {@link #nameTextTopY}, the alignment is compared against the
+     * NAMED constants - the SwingConstants values differ between JDK
+     * versions, so a magic number would misplace the band.
      */
     private int nameTextX(Graphics g) {
         FontMetrics baseFm = g.getFontMetrics(getFont());
@@ -255,10 +321,10 @@ public class SearchMatchLabel extends JLabel {
         int textWidth = baseFm.stringWidth(getText() == null ? "" : getText());
         int labelWidth = getWidth() - in.left - in.right;
         int align = getHorizontalAlignment();
-        if (align == 1) {
+        if (align == CENTER) {
             return in.left + (labelWidth - textWidth) / 2;
         }
-        if (align == 2) {
+        if (align == RIGHT || align == TRAILING) {
             return in.left + labelWidth - textWidth;
         }
         return in.left;
@@ -283,6 +349,31 @@ public class SearchMatchLabel extends JLabel {
         FontMetrics baseFm = g.getFontMetrics(getFont());
         FontMetrics keyFm = g.getFontMetrics(getKeyFont());
         return nameTextTopY(g) + (baseFm.getHeight() - keyFm.getHeight()) / 2;
+    }
+
+    /**
+     * Paints one band of the {@link #highlightBands} list on the NAME text
+     * (the same geometry as {@link #paintHighlightBand}), with the band's
+     * own color (the palette's default search-match color when the band
+     * carries none).
+     */
+    private void paintBand(Graphics g, HighlightBand band) {
+        String text = getText();
+        if (text == null || text.isEmpty() || band.start() < 0 || band.start() >= text.length()) {
+            return;
+        }
+        int end = Math.min(band.start() + band.length(), text.length());
+        if (end <= band.start()) {
+            return;
+        }
+        FontMetrics fm = g.getFontMetrics(getFont());
+        int textY = nameTextTopY(g);
+        int textX = nameTextX(g);
+        char[] chars = text.toCharArray();
+        int bandX = textX + fm.charsWidth(chars, 0, band.start());
+        int bandWidth = Math.max(1, fm.charsWidth(chars, band.start(), end - band.start()));
+        g.setColor(band.color() != null ? band.color() : GuiColors.getSearchMatch());
+        g.fillRect(bandX, textY, bandWidth, fm.getHeight());
     }
 
     /**

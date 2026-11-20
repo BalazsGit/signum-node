@@ -17,6 +17,7 @@ import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.Component;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -35,10 +36,21 @@ import java.util.Set;
  * the full conventional name.
  * </p>
  * <p>
- * <b>Dropdown behavior:</b> existing item rows have an empty dropdown model
- * (only the saved/unsaved text of that row is shown — no discovered files).
- * The add row's dropdown lists the discovered {@code *.db} file names (without
- * the extension) as selectable, editable candidates.
+ * <b>Dropdown behavior:</b> every item row's dropdown lists the row's saved
+ * (baseline) value plus its current (unsaved) editor value when it differs —
+ * rebuilt on every edit so the saved value can always be picked back in one
+ * click — and each entry is colored by the state of its OWN value (saved
+ * yellow, unsaved the normal text color; the node configuration panel's
+ * state-aware dropdown in its 2-state form). The add row's dropdown lists the
+ * discovered {@code *.db} file names (without the extension) as selectable,
+ * editable candidates, colored the same way (a discovered file is saved).
+ * </p>
+ * <p>
+ * <b>Trash semantics:</b> the trash icon acts on the row's SAVED (on-disk)
+ * file: a renamed row still confirms and deletes the file that exists, not
+ * the not-yet-existing new name (the node configuration list editors'
+ * saved-item deletion). A row WITHOUT a saved value is a not-yet-created
+ * file and is removed immediately, without any confirmation.
  * </p>
  */
 public final class DatabaseFileListEditor extends JPanel {
@@ -94,6 +106,22 @@ public final class DatabaseFileListEditor extends JPanel {
         ConfigurationUtils.styleComboEditor(addField);
         addField.setPrototypeDisplayValue("signum.sqlite");
         addField.setToolTipText("Type a database file name (without .db), then press '+' (or Enter) to add it.");
+        // Every add-row candidate is colored by the state of its OWN value: a
+        // discovered file (it exists on disk) is saved (yellow), anything
+        // else (e.g. the typed, not-yet-created name) unsaved — the node
+        // configuration panel list editors' per-item dropdown coloring.
+        addField.setRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value, int index,
+                    boolean isSelected, boolean cellHasFocus) {
+                Component c = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+                if (value instanceof String s) {
+                    c.setForeground(addRowCandidates.contains(s)
+                            ? GuiColors.getSaved() : GuiColors.getUnsaved());
+                }
+                return c;
+            }
+        });
         installAddEnterAction();
 
         helpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
@@ -122,6 +150,11 @@ public final class DatabaseFileListEditor extends JPanel {
         }
     }
 
+    /** @return the item's editable combo boxes (the panel's search highlights their editor fields). */
+    List<JComboBox<String>> getItemFields() {
+        return itemFields;
+    }
+
     public List<String> getItems() {
         List<String> items = new ArrayList<>();
         for (JComboBox<String> combo : itemFields) {
@@ -131,6 +164,30 @@ public final class DatabaseFileListEditor extends JPanel {
             }
         }
         return items;
+    }
+
+    /**
+     * The rows the user RENAMED: the (saved, current) file name pairs WITHOUT
+     * the {@code .db} extension, for every item row that has a saved
+     * (baseline) value and whose current editor text differs from it. The
+     * owning panel uses this to RENAME the existing files on disk (with their
+     * content) when the profile is saved.
+     *
+     * @return the rename pairs (possibly empty, never null)
+     */
+    public List<String[]> getRenamedFiles() {
+        List<String[]> renames = new ArrayList<>();
+        for (JComboBox<String> combo : itemFields) {
+            String saved = savedValuesByCombo.get(combo);
+            if (saved == null || saved.isEmpty()) {
+                continue;
+            }
+            String current = comboText(combo).trim();
+            if (!current.isEmpty() && !current.equals(saved)) {
+                renames.add(new String[] { saved, current });
+            }
+        }
+        return renames;
     }
 
     public void setItemsWithProtected(List<String> values, Set<String> protectedSet) {
@@ -195,9 +252,15 @@ public final class DatabaseFileListEditor extends JPanel {
         if (!itemFields.contains(field)) {
             return;
         }
-        String editorText = comboText(field).trim();
-        String fileName = editorText + ".db";
-        if (removeConfirmation != null && !removeConfirmation.apply(fileName)) {
+        // The trash acts on the row's SAVED (on-disk) file: a renamed row still
+        // deletes the file that exists, not the not-yet-existing new name (the
+        // node configuration list editors' saved-item deletion). A row WITHOUT
+        // a saved value is a not-yet-created file — removed immediately,
+        // without any confirmation.
+        String saved = savedValuesByCombo.get(field);
+        if (saved != null && !saved.isEmpty()
+                && removeConfirmation != null
+                && !removeConfirmation.apply(saved + ".db")) {
             return;
         }
         itemFields.remove(field);
@@ -314,28 +377,13 @@ public final class DatabaseFileListEditor extends JPanel {
         if (savedValues == null) {
             return;
         }
-        isProgrammaticChange = true;
-        try {
-            savedValuesByCombo.clear();
-            for (int i = 0; i < itemFields.size() && i < savedValues.size(); i++) {
-                String saved = savedValues.get(i);
-                String current = comboText(itemFields.get(i)).trim();
-                if (saved != null && !saved.isEmpty()) {
-                    savedValuesByCombo.put(itemFields.get(i), saved);
-                }
-                List<String> values = new ArrayList<>();
-                if (saved != null && !saved.isEmpty()) {
-                    values.add(saved);
-                }
-                if (!current.isEmpty() && !values.contains(current)) {
-                    values.add(current);
-                }
-                DefaultComboBoxModel<String> model = new DefaultComboBoxModel<>(values.toArray(new String[0]));
-                itemFields.get(i).setModel(model);
-                itemFields.get(i).getEditor().setItem(current);
+        savedValuesByCombo.clear();
+        for (int i = 0; i < itemFields.size() && i < savedValues.size(); i++) {
+            String saved = savedValues.get(i);
+            if (saved != null && !saved.isEmpty()) {
+                savedValuesByCombo.put(itemFields.get(i), saved);
             }
-        } finally {
-            isProgrammaticChange = false;
+            rebuildItemModel(itemFields.get(i), comboText(itemFields.get(i)).trim());
         }
     }
 
@@ -360,7 +408,40 @@ public final class DatabaseFileListEditor extends JPanel {
             removeItem(combo);
             return;
         }
+        // DEFERRED: this runs inside a document-change notification (the
+        // editor's document listener), and the model swap reconfigures the
+        // editor (touches its document) — mutating a document while its own
+        // notification is in flight is forbidden by Swing ("Attempt to mutate
+        // in notification"). The node configuration panel defers its
+        // state-aware refresh the same way.
+        SwingUtilities.invokeLater(() -> rebuildItemModel(combo, text));
         fireChange();
+    }
+
+    /**
+     * Rebuilds one item row's dropdown model — the saved (baseline) value
+     * plus the current editor value when it differs (the node configuration
+     * panel's state-aware rebuild in its 2-state form): the user can always
+     * pick the saved value back in one click. The entries are colored per
+     * item by the row's renderer (saved yellow, unsaved normal text color).
+     */
+    private void rebuildItemModel(JComboBox<String> combo, String current) {
+        String saved = savedValuesByCombo.get(combo);
+        LinkedHashSet<String> items = new LinkedHashSet<>();
+        if (saved != null && !saved.isEmpty()) {
+            items.add(saved);
+        }
+        if (!current.isEmpty() && !items.contains(current)) {
+            items.add(current);
+        }
+        isProgrammaticChange = true;
+        try {
+            combo.setModel(new DefaultComboBoxModel<>(items.toArray(new String[0])));
+            // Keep the (typed) current value in the editor after the swap.
+            combo.getEditor().setItem(current);
+        } finally {
+            isProgrammaticChange = false;
+        }
     }
 
     private static String comboText(JComboBox<String> combo) {
