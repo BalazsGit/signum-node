@@ -24,7 +24,11 @@ import java.util.Locale;
  *       prefix and a {@code ?query} suffix are tolerated on input and dropped on output); the
  *       final non-empty path segment is the configured database file, while a directory-only URL
  *       ends with {@code /}; configured database files must have the {@code .db} extension;</li>
- *   <li>discovered database files are the {@code *.db} regular files of a directory.</li>
+ *   <li>discovered database files are the {@code *.db} regular files of a directory;</li>
+ *   <li>the database assignment of a node profile is its own {@code DB.Url} property —
+ *       derived via {@link #assignmentProfileName}, never stored separately; a database
+ *       profile's {@code profile.json} stores engine settings only (a stored
+ *       {@code DB.Url} in it is ignored — the URL is derived).</li>
  * </ul>
  * <p>
  * Headless and defensive: no method throws for missing/unreadable input — the discovery
@@ -35,6 +39,13 @@ public final class SqliteDatabasePaths {
 
     /** The extension of the discoverable SQLite database files (case-insensitive). */
     private static final String DB_FILE_EXTENSION = ".db";
+
+    /**
+     * The conventional database file name of a per-profile database
+     * ({@code signum.sqlite.db}) — the active file of a profile whose directory
+     * holds no {@code *.db} file yet (the database is created lazily).
+     */
+    public static final String DEFAULT_DATABASE_FILE_NAME = "signum.sqlite.db";
 
     /** The normalized (slash-separated, {@code ./}-free) convention base: {@code database/SQLite}. */
     private static final String NORMALIZED_BASE = "database/SQLite";
@@ -215,6 +226,31 @@ public final class SqliteDatabasePaths {
                 && fileName.indexOf('/') < 0
                 && fileName.indexOf('\\') < 0
                 && fileName.toLowerCase(Locale.ROOT).endsWith(DB_FILE_EXTENSION);
+    }
+
+    /**
+     * The database-profile name the given node-profile {@code DB.Url} is assigned to —
+     * derived live from the URL itself (the node profile's property is the SSOT of the
+     * database assignment; there is no separate assignment store):
+     * <ul>
+     *   <li>a convention URL naming a database file in
+     *       {@code ./database/SQLite/<profile>} → {@code <profile>};</li>
+     *   <li>an absent/blank URL (the node runs its default database), a non-SQLite URL,
+     *       a malformed URL, a URL naming no {@code *.db} file, or a URL outside the
+     *       per-profile convention (a custom path) → {@code null}.</li>
+     * </ul>
+     * Callers that must distinguish "no URL" from a custom URL check the URL's blankness
+     * themselves.
+     */
+    public static String assignmentProfileName(String dbUrl) {
+        if (dbUrl == null || dbUrl.isBlank()) {
+            return null;
+        }
+        SqliteUrlParts parts = splitUrl(dbUrl);
+        if (parts == null || !isDbFile(parts.fileName())) {
+            return null;
+        }
+        return deriveProfileName(parts.dir());
     }
 
     /**

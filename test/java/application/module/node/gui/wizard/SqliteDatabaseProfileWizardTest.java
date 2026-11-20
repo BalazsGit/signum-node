@@ -1,5 +1,6 @@
 package application.module.node.gui.wizard;
 
+import application.module.database.profile.SQLiteProfile;
 import application.module.database.utils.DatabaseConfigurationUtils;
 import application.module.node.profile.ProfileCreateDefaults;
 import application.utils.io.PathUtils;
@@ -70,7 +71,7 @@ class SqliteDatabaseProfileWizardTest {
     }
 
     @Test
-    @DisplayName("createProfile writes ./database/SQLite/<name>/profile.json pointing at the composed URL")
+    @DisplayName("createProfile writes ./database/SQLite/<name>/profile.json (engine settings only — the URL is derived)")
     void createProfileCreatesProfileJson() throws IOException {
         String name = "wiz_probe_" + System.nanoTime();
         Path dir = sqliteProfileDir(name);
@@ -81,8 +82,11 @@ class SqliteDatabaseProfileWizardTest {
             Path profileJson = dir.resolve("profile.json");
             assertTrue(Files.isRegularFile(profileJson), "the profile.json must exist");
             JsonObject json = JsonParser.parseString(Files.readString(profileJson)).getAsJsonObject();
+            assertFalse(json.has(SQLiteProfile.CFG_URL),
+                    "the database URL must NOT be stored in the profile JSON (it is derived; the node profile's DB.Url is the SSOT)");
             assertEquals(SqliteDatabaseProfileWizard.composeUrl(name, "signum.sqlite.db"),
-                    json.get("DB.Url").getAsString());
+                    new SQLiteProfile(name).getDbUrl(),
+                    "the derived URL of the fresh profile equals the wizard's composed URL");
         } finally {
             deleteRecursively(dir);
         }

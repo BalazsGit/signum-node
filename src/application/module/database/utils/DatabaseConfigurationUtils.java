@@ -20,6 +20,7 @@ import application.module.database.profile.MariadbProfile;
 import application.module.database.profile.MariadbProfile.DatabaseInfo;
 import application.module.database.profile.MariadbProfile.UserGrant;
 import application.module.database.profile.MariadbProfile.UserInfo;
+import application.module.database.profile.SQLiteProfile;
 import application.utils.io.PathUtils;
 
 import org.slf4j.Logger;
@@ -507,12 +508,15 @@ public class DatabaseConfigurationUtils {
                 } catch (Exception e) {
                     logger.warn("Could not parse MariaDB profile '{}': {}", profileName, e.getMessage());
                 }
-            } else if (engine.equalsIgnoreCase("SQLite") && json.has("DB.Url")) {
-                // Portable SQLite profile format: the profile.json itself carries
-                // the JDBC URL (see SQLiteProfile).
+            } else if (engine.equalsIgnoreCase("SQLite") && (json.has("DB.Url")
+                    || json.has(SQLiteProfile.CFG_JOURNAL_MODE)
+                    || json.has(SQLiteProfile.CFG_CACHE_SIZE))) {
+                // Portable SQLite profile format: the profile.json carries the
+                // engine settings; the JDBC URL is a derived value (a legacy
+                // stored DB.Url wins — see SQLiteProfile).
                 DbInstance instance = new DbInstance();
                 instance.name = profileName;
-                instance.url = json.get("DB.Url").getAsString();
+                instance.url = new SQLiteProfile(profileName, json).getDbUrl();
                 profile.databases.add(instance);
             } else if (json.has("databases")) {
                 // Legacy/Generic format

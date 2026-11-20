@@ -608,6 +608,26 @@ public class ConfigurationUtils {
      */
     public static ListCellRenderer<Object> createProfileComboBoxRenderer(Supplier<String> runningProfileSupplier,
             Supplier<String> activeProfileSupplier) {
+        return createProfileComboBoxRenderer(runningProfileSupplier, activeProfileSupplier, null);
+    }
+
+    /**
+     * The profile combo renderer with the unsaved-changes marker: in addition to
+     * the running / active highlighting, a profile whose name is in the supplied
+     * unsaved set is displayed with a trailing {@code " *"} — the node / logging
+     * panel convention for profiles that carry unsaved (editor) changes.
+     *
+     * @param runningProfileSupplier   Supplier for the name of the currently running
+     *                                 profile.
+     * @param activeProfileSupplier    Supplier for the name of the currently active
+     *                                 (applied) profile.
+     * @param unsavedProfilesSupplier  Supplier for the set of profile names that
+     *                                 currently carry unsaved changes (may be null
+     *                                 for the plain running / active highlighting).
+     * @return A custom cell renderer.
+     */
+    public static ListCellRenderer<Object> createProfileComboBoxRenderer(Supplier<String> runningProfileSupplier,
+            Supplier<String> activeProfileSupplier, Supplier<Set<String>> unsavedProfilesSupplier) {
         return new DefaultListCellRenderer() {
             @Override
             public Component getListCellRendererComponent(JList<?> list, Object value, int index,
@@ -631,6 +651,12 @@ public class ConfigurationUtils {
                         } else {
                             c.setForeground(GuiColors.getUnsaved());
                         }
+                    }
+                    // A profile with unsaved (editor) changes carries the trailing
+                    // star — the node / logging panel convention.
+                    if (unsavedProfilesSupplier != null && c instanceof JLabel label
+                            && unsavedProfilesSupplier.get().contains(valStr)) {
+                        label.setText(valStr + " *");
                     }
                 }
                 return c;

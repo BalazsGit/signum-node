@@ -125,6 +125,19 @@ class SqliteDatabasePathsTest {
     }
 
     @Test
+    @DisplayName("assignmentProfileName: a convention URL names the profile; absent, non-SQLite, non-.db and custom URLs yield null")
+    void assignmentProfileName() {
+        assertEquals("mainnet", SqliteDatabasePaths.assignmentProfileName(
+                "jdbc:sqlite:file:./database/SQLite/mainnet/signum.sqlite.db"));
+        assertNull(SqliteDatabasePaths.assignmentProfileName(null));
+        assertNull(SqliteDatabasePaths.assignmentProfileName("  "));
+        assertNull(SqliteDatabasePaths.assignmentProfileName("jdbc:mariadb://localhost:3306/signum"));
+        assertNull(SqliteDatabasePaths.assignmentProfileName("jdbc:sqlite:file:./elsewhere/other.db"));
+        assertNull(SqliteDatabasePaths.assignmentProfileName(
+                "jdbc:sqlite:file:./database/SQLite/mainnet/ledger.data"));
+    }
+
+    @Test
     @DisplayName("composeUrl/splitUrl: a round trip keeps dir and file")
     void composeSplitRoundTrip() {
         String url = SqliteDatabasePaths.composeUrl(Path.of("database", "SQLite", "mainnet"), "signum.sqlite.db");
